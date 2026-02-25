@@ -264,6 +264,14 @@ class GoogleEmbeddingModel:
         n_unique_vecs = len(set(sigs))
         ratio = n_unique_vecs / float(n_unique_texts)
 
+        _logger = get_logger(__name__)
+        _logger.debug(
+            "Uniqueness guard: %d/%d unique vectors (%.2f%%) "
+            "for task_type=%s model=%s normalize=%s output_dim=%s",
+            n_unique_vecs, n_unique_texts, ratio * 100,
+            task_type, self.model_name, self.normalize, self.output_dim,
+        )
+
         if ratio < float(self.uniqueness_guard_min_unique_ratio):
             preview_n = min(5, n_unique_texts)
             previews = [unique_texts[i][:120].replace("\n", " ") for i in range(preview_n)]
@@ -271,7 +279,9 @@ class GoogleEmbeddingModel:
                 "Embedding uniqueness too low: "
                 f"{n_unique_vecs}/{n_unique_texts} ({ratio:.2%}) "
                 f"for task_type={task_type} model={self.model_name}. "
-                "This MAY indicate embedding collapse or API misuse. "
+                f"normalize={self.normalize}, output_dim={self.output_dim}. "
+                "Possible causes: API returning identical vectors, model misconfiguration, "
+                "or all inputs collapsing to the same representation. "
                 f"Examples (first {preview_n} unique inputs): {previews}"
             )
 

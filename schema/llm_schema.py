@@ -1,8 +1,6 @@
 from __future__ import annotations
 from typing import List, Literal
 from pydantic import BaseModel, Field, ConfigDict
-from pydantic import ConfigDict
-from typing import Literal
 
 class SkillItem(BaseModel):
     """Represents an individual skill recommendation with supporting evidence."""

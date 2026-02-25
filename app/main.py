@@ -1,20 +1,23 @@
 # app/main.py
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from functions.online.pipeline_5_api_payload import run_pipeline_5_api_payload
 
 APP_NAME = "skills_recommendation_api"
 APP_VERSION = "0.1.0"
 
+logger = logging.getLogger(__name__)
+
 # Default config paths (override via env in prod)
-DEFAULT_PARAMETERS_PATH = os.environ.get("PARAMETERS_PATH", "configs/parameters.yaml")
-DEFAULT_CREDENTIALS_PATH = os.environ.get("CREDENTIALS_PATH", "configs/credentials.yaml")
+DEFAULT_PARAMETERS_PATH = os.environ.get("PARAMETERS_PATH") or "configs/parameters.yaml"
+DEFAULT_CREDENTIALS_PATH = os.environ.get("CREDENTIALS_PATH") or "configs/credentials.yaml"
 
 
 class RecommendSkillsRequest(BaseModel):
@@ -28,6 +31,14 @@ class RecommendSkillsRequest(BaseModel):
         False,
         description="If true, fail when any recommended skill cannot be joined to retrieval meta.",
     )
+
+    @field_validator("query")
+    @classmethod
+    def query_must_not_be_blank(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("Query cannot be empty or whitespace-only")
+        return stripped
 
 
 class RecommendSkillsResponse(BaseModel):
@@ -59,8 +70,8 @@ def create_app() -> FastAPI:
             )
             return out
         except Exception as e:
-            # Keep error surface predictable for API clients
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            logger.error("Pipeline error in /v1/recommend-skills", exc_info=True)
+            raise HTTPException(status_code=500, detail="Internal server error") from e
 
     return app
 

@@ -26,28 +26,11 @@ import inspect
 from functions.core.index_store import get_faiss_store_cached
 from functions.core.vector_search import to_api_payload, vector_search_faiss
 from functions.utils.config import load_parameters
+from functions.utils.config_access import cfg_get as _get, cfg_get_path as _get_path
 from functions.utils.logging import get_logger
 from functions.utils.paths import repo_root_from_parameters_path, resolve_path
 
 logger = get_logger(__name__)
-
-
-# -----------------------------
-# Config access helpers
-# -----------------------------
-def _get(cfg: Any, key: str) -> Any:
-    """Get value from dict-like or attribute-like config."""
-    if isinstance(cfg, dict):
-        return cfg[key]
-    return getattr(cfg, key)
-
-
-def _get_path(cfg: Any, path: Sequence[str]) -> Any:
-    """Traverse nested config by keys/attrs."""
-    cur = cfg
-    for k in path:
-        cur = _get(cur, k)
-    return cur
 
 
 # -----------------------------
