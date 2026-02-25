@@ -26,25 +26,10 @@ from functions.core.hybrid_merge import merge_hybrid_results
 from functions.online.pipeline_3a_vector_search import run_pipeline_3a_vector_search
 from functions.online.pipeline_3b_bm25_search import run_pipeline_3b_bm25_search
 from functions.utils.config import load_parameters
+from functions.utils.config_access import cfg_get as _get, cfg_get_path as _get_path
 from functions.utils.logging import get_logger
 
 logger = get_logger(__name__)
-
-
-# -----------------------------
-# Config access helpers
-# -----------------------------
-def _get(cfg: Any, key: str) -> Any:
-    if isinstance(cfg, dict):
-        return cfg[key]
-    return getattr(cfg, key)
-
-
-def _get_path(cfg: Any, path: Sequence[str]) -> Any:
-    cur = cfg
-    for k in path:
-        cur = _get(cur, k)
-    return cur
 
 
 def run_pipeline_4a_hybrid_context(

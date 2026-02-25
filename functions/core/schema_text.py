@@ -26,6 +26,8 @@ from hashlib import sha1
 from pathlib import Path
 from typing import Any, Dict, Iterable
 
+from functions.core.schema_postprocess import validate_schema_ast
+
 DEFAULT_EXPORTS = ("LLMOutput", "JudgeResult")
 
 
@@ -53,6 +55,10 @@ def _load_module_from_path(py_path: Path) -> Any:
     if module_name in sys.modules:
         del sys.modules[module_name]
 
+    # Validate schema code with AST safety check before execution
+    source_code = py_path.read_text(encoding="utf-8")
+    validate_schema_ast(source_code)
+
     spec = importlib.util.spec_from_file_location(module_name, str(py_path))
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Failed to create import spec for: {py_path}")
@@ -64,10 +70,10 @@ def _load_module_from_path(py_path: Path) -> Any:
 
     try:
         spec.loader.exec_module(module)  # type: ignore[attr-defined]
-    except Exception:
+    except Exception as e:
         # Clean up on failure to avoid poisoning future imports
         sys.modules.pop(module_name, None)
-        raise
+        raise RuntimeError(f"Failed to load schema module {py_path}: {e}") from e
 
     return module
 

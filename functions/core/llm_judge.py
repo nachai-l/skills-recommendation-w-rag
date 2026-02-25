@@ -8,23 +8,12 @@ from typing import Any, Dict, Optional, Sequence, Type
 import yaml
 from pydantic import BaseModel
 
+from functions.core.schema_postprocess import validate_schema_ast
 from functions.llm.client import build_gemini_client
 from functions.llm.prompts import build_common_variables, json_dumps_stable
 from functions.llm.runner import run_prompt_yaml_json
+from functions.utils.config_access import cfg_get as _get, cfg_get_path as _get_path
 from functions.utils.paths import resolve_path
-
-
-def _get(cfg: Any, key: str) -> Any:
-    if isinstance(cfg, dict):
-        return cfg[key]
-    return getattr(cfg, key)
-
-
-def _get_path(cfg: Any, path: Sequence[str]) -> Any:
-    cur = cfg
-    for k in path:
-        cur = _get(cur, k)
-    return cur
 
 
 def _read_text(path: str | Path) -> str:
@@ -51,6 +40,10 @@ def load_schema_model(schema_py_path: str | Path, *, model_name: str) -> Type[Ba
     schema_py_path = Path(schema_py_path)
     if not schema_py_path.exists():
         raise FileNotFoundError(f"Missing schema py: {schema_py_path}")
+
+    # Validate schema code with AST safety check before execution
+    code = schema_py_path.read_text(encoding="utf-8")
+    validate_schema_ast(code)
 
     spec = spec_from_file_location(schema_py_path.stem, str(schema_py_path))
     if spec is None or spec.loader is None:

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 def _norm_name(s: str) -> str:
@@ -86,6 +89,12 @@ def build_api_payload_from_4b(
             missing += 1
             if require_all_meta:
                 raise ValueError(f"Missing retrieval meta for recommended skill_name={skill_name!r}")
+            else:
+                logger.warning(
+                    "No retrieval meta for recommended skill_name=%r "
+                    "(skill_id and source will be None)",
+                    skill_name,
+                )
 
         out_recs.append(
             {

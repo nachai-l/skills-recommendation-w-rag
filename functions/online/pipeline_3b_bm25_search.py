@@ -29,6 +29,7 @@ from functions.core.bm25 import (
     to_api_payload,
 )
 from functions.utils.config import load_parameters
+from functions.utils.config_access import cfg_get as _get, cfg_get_path as _get_path
 from functions.utils.logging import get_logger
 from functions.utils.paths import repo_root_from_parameters_path, resolve_path
 
@@ -36,24 +37,9 @@ logger = get_logger(__name__)
 
 
 # -----------------------------
-# Config access helpers
-# -----------------------------
-def _get(cfg: Any, key: str) -> Any:
-    if isinstance(cfg, dict):
-        return cfg[key]
-    return getattr(cfg, key)
-
-
-def _get_path(cfg: Any, path: Sequence[str]) -> Any:
-    cur = cfg
-    for k in path:
-        cur = _get(cur, k)
-    return cur
-
-
-# -----------------------------
 # Process-local cache (ONLINE)
 # -----------------------------
+_BM25_CACHE_MAX_SIZE = 2  # evict oldest entries when exceeded
 _BM25_CACHE: Dict[str, Any] = {}  # key -> BM25Index
 
 
@@ -116,6 +102,11 @@ def get_bm25_index_cached(
         doc_key=doc_key,
     )
 
+    # Evict oldest entries if cache is full
+    while len(_BM25_CACHE) >= _BM25_CACHE_MAX_SIZE:
+        oldest_key = next(iter(_BM25_CACHE))
+        del _BM25_CACHE[oldest_key]
+
     _BM25_CACHE[key] = index
     return index
 
@@ -169,12 +160,19 @@ def run_pipeline_3b_bm25_search(
     repo_root = repo_root_from_parameters_path(parameters_path)
     corpus_path = resolve_path(str(corpus_path_raw), base_dir=repo_root)
 
-    # BM25 corpus schema (from artifacts/index_store/bm25_corpus.jsonl):
-    # { "id": ..., "title": ..., "text": ..., "source": ... }
-    id_key = "id"
-    name_key = "title"
-    source_key = "source"
-    doc_key = "text"
+    # BM25 corpus field mapping — read from config (consistent with pipeline 3a),
+    # with defaults matching the canonical corpus schema.
+    def _cfg_or_default(cfg: Any, key: str, default: str) -> str:
+        try:
+            return str(_get(cfg, key))
+        except (KeyError, AttributeError):
+            return default
+
+    corpus_cfg = _get_path(params, ["rag", "corpus"])
+    id_key = _cfg_or_default(corpus_cfg, "id_col", "id")
+    name_key = _cfg_or_default(corpus_cfg, "title_col", "title")
+    source_key = _cfg_or_default(corpus_cfg, "source_col", "source")
+    doc_key = _cfg_or_default(corpus_cfg, "text_col", "text")
 
     if debug:
         logger.info(
