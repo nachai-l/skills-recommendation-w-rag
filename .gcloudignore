@@ -1,0 +1,25 @@
+# --- common junk ---
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+.git/
+
+# --- ignore all artifacts by default ---
+artifacts/**
+
+# --- UNIGNORE PARENTS (critical) ---
+!artifacts/
+!artifacts/index_store/
+
+# --- include index store files needed at runtime ---
+!artifacts/index_store/**
+!artifacts/index_store/faiss.index
+!artifacts/index_store/faiss_meta.jsonl
+!artifacts/index_store/bm25_corpus.jsonl
+!artifacts/index_store/bm25_stats.json
+!artifacts/index_store/manifest.json
+
+# keep outputs ignored
+artifacts/outputs/**
