@@ -1,0 +1,180 @@
+# ============================================================
+# Skills Recommendation via Hybrid RAG (FAISS + BM25)
+# Built on Universal LLM Batch Generation & Validation Framework
+# ============================================================
+
+run:
+  name: skills_recommendation_via_rag
+  timezone: Asia/Bangkok
+  log_level: INFO
+  log_file: null
+  run_id: null
+
+# ------------------------------------------------------------
+# Input table configuration (Pipeline 2 - Batch ingest/index)
+# ------------------------------------------------------------
+input:
+  # MVP: skills corpus / taxonomy table (one row per skill item)
+  path: raw_data/skill_taxonomy.csv
+  format: csv                   # csv | psv | tsv | xlsx
+  encoding: utf-8
+  sheet: null
+
+  required_columns:
+    - skill_id
+    - skill_name
+    - skill_text
+    - source
+    - Foundational_Criteria
+    - Intermediate_Criteria
+    - Advanced_Criteria
+
+# ------------------------------------------------------------
+# Context construction / rendering (Online Pipeline 4a)
+# ------------------------------------------------------------
+context:
+  columns:
+    mode: include                   # all | include | exclude
+    include:
+      - skill_id
+      - skill_name
+      - skill_text
+      - source
+      - Foundational_Criteria
+      - Intermediate_Criteria
+      - Advanced_Criteria
+    exclude: []
+
+  # Pipeline 4a will inject {context} built from pipeline3a + pipeline3b results.
+  row_template: |
+    - skill_id: {skill_id}
+      skill_name: {skill_name}
+      source: {source}
+      score_vector: {score_vector}
+      score_bm25: {score_bm25}
+      score_hybrid: {score_hybrid}
+      skill_text: |
+        {skill_text}
+      criteria:
+        foundational: |
+          {Foundational_Criteria}
+        intermediate: |
+          {Intermediate_Criteria}
+        advanced: |
+          {Advanced_Criteria}
+
+  auto_kv_block: false
+  kv_order: input_order
+
+  max_context_chars: 30000
+  truncate_field_chars: 2000
+
+  group_header_template: null
+  group_footer_template: null
+
+# ------------------------------------------------------------
+# Prompt configuration (Pipelines 0–1–4)
+# ------------------------------------------------------------
+prompts:
+  generation:
+    path: prompts/generation.yaml
+
+  judge:
+    enabled: false
+    path: prompts/judge.yaml
+
+  schema_auto_py_generation:
+    path: prompts/schema_auto_py_generation.yaml
+
+  schema_auto_json_summarization:
+    path: prompts/schema_auto_json_summarization.yaml
+
+# ------------------------------------------------------------
+# Output schema configuration (Pipelines 0–1)
+# ------------------------------------------------------------
+llm_schema:
+  py_path: schema/llm_schema.py
+  txt_path: schema/llm_schema.txt
+  auto_generate: true
+  force_regenerate: true
+  archive_dir: archived/
+
+# ------------------------------------------------------------
+# Embeddings (Pipeline 2 + Pipeline 3a)
+# ------------------------------------------------------------
+embeddings:
+  model_name: gemini-embedding-001
+  batch_size: 64
+  dim: 3072
+  normalize: true
+  task_type: SEMANTIC_SIMILARITY
+  max_workers: 5
+  cache_dir: artifacts/cache/embeddings
+  report_log_per_n_batch: 10
+  test_mode: false
+  test_max_iteration: 30
+
+# ------------------------------------------------------------
+# RAG configuration (Pipeline 2 + Online 3a/3b + 4a)
+# ------------------------------------------------------------
+rag:
+  backend:
+    vector: faiss                   # faiss | vertex (later)
+    bm25: local                     # local (BM25 in-process)
+
+  corpus:
+    id_col: skill_id
+    title_col: skill_name
+    text_col: skill_text
+    source_col: source
+
+  bm25:
+    k1: 1.5
+    b: 0.75
+    tokenizer: simple               # simple | whitespace | custom
+    lower: true
+    remove_punct: true
+    min_token_len: 2
+
+  vector_search:
+    top_k_default: 20
+
+  hybrid:
+    alpha: 0.6
+    normalize_scores: true
+    tie_break: [hybrid, vector, bm25, id]
+
+# ------------------------------------------------------------
+# Index store locations (Pipeline 2 outputs; used by online)
+# ------------------------------------------------------------
+index_store:
+  dir: artifacts/index_store
+
+  faiss:
+    index_path: artifacts/index_store/faiss.index
+    meta_path: artifacts/index_store/faiss_meta.jsonl
+
+  bm25:
+    corpus_path: artifacts/index_store/bm25_corpus.jsonl
+    stats_path: artifacts/index_store/bm25_stats.json
+
+# ------------------------------------------------------------
+# LLM execution settings (Online Pipeline 4a/4b)
+# ------------------------------------------------------------
+llm:
+  model_name: gemini-3-flash-preview
+  temperature: 1.0
+  max_retries: 5
+  timeout_sec: 60
+  max_workers: 5
+  silence_client_lv_logs: true
+
+# ------------------------------------------------------------
+# Deterministic caching (LLM calls, optional retrieval cache)
+# ------------------------------------------------------------
+cache:
+  enabled: true
+  force: false
+  dir: artifacts/cache
+  dump_failures: true
+  verbose: 10

@@ -1,0 +1,69 @@
+# prompts/schema_auto_py_generation.yaml
+name: schema_auto_py_generation_v2
+version: 2
+purpose: >
+  Auto-generate a Pydantic schema Python file (schema/llm_schema.py) for structured JSON output.
+  Used when schema/llm_schema.py is missing or when llm_schema.force_regenerate is enabled.
+
+system: |
+  You are an expert Python developer specializing in Pydantic v2 schemas.
+  You must output a COMPLETE Python file content for schema/llm_schema.py.
+
+  CRITICAL RULES (must follow):
+  - Output MUST be Python code only. No markdown. No code fences. No commentary. No leading/trailing text.
+  - The file MUST be runnable (syntax valid) and importable.
+  - Use Pydantic v2 style: BaseModel, Field, ConfigDict.
+  - STRICT schema: every BaseModel MUST include:
+        model_config = ConfigDict(extra="forbid")
+  - Prefer snake_case JSON keys as model field names (never spaces, never Title Case).
+  - Keep the file minimal: only necessary imports and fields.
+  - Include exactly these models unless the provided CONTEXT explicitly requires more:
+      - LLMOutput (generation output)
+      - JudgeResult (judge output)
+  - If CONTEXT is ambiguous, make conservative assumptions and do NOT add optional wrappers.
+  - Use Literal for fixed labels (e.g., PASS/FAIL).
+  - Add short docstrings + concise Field descriptions.
+
+  SECURITY CONSTRAINTS (strictly enforced by a static validator — violations will reject the file):
+  - ALLOWED imports ONLY — no exceptions:
+      from __future__ import annotations   # optional
+      from typing import ...               # any symbols from typing
+      from pydantic import ...             # any symbols from pydantic
+  - DO NOT import os, sys, subprocess, socket, importlib, shutil, pathlib,
+    json, re, io, base64, hashlib, http, urllib, requests, or ANY other module.
+  - NEVER use eval(), exec(), open(), compile(), __import__(), getattr(), setattr(),
+    globals(), locals(), or vars() anywhere in the file.
+  - NEVER include side effects at module level: no function calls, no print(),
+    no logging, no file I/O, no network calls.
+  - ONLY these top-level constructs are permitted: import statements, class definitions,
+    simple assignments (e.g. __all__), and module-level docstrings.
+  - NO standalone function definitions (def) or async constructs at any level.
+
+user: |
+  TASK
+  Generate the full Python code for a Pydantic schema file at: schema/llm_schema.py
+
+  The schema must represent the structured JSON we want the LLM to output.
+  It will be used for strict validation of LLM outputs.
+
+  INPUT SPEC / CONTEXT
+  {context}
+
+  OUTPUT REQUIREMENTS (must satisfy):
+  - Output MUST be a single Python file content (no surrounding text).
+  - Include required imports and __all__ at the bottom.
+  - Define:
+      class LLMOutput(BaseModel): ...   # generation output schema
+      class JudgeResult(BaseModel): ... # judge output schema
+  - Both classes MUST include:
+      model_config = ConfigDict(extra="forbid")
+
+  - JudgeResult fields:
+      verdict: Literal["PASS","FAIL"]
+      score: int (ge=0, le=100)
+      reasons: List[str] (default_factory=list)
+
+  - Do NOT reference any external project modules.
+  - Prefer explicit Field(..., description="...") for each field.
+
+  Produce the Python file now.

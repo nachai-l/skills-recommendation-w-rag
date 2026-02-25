@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.env
+
+# Artifacts / outputs / caches
+artifacts/
+archived/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store

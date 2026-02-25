@@ -1,0 +1,108 @@
+{
+  "models": {
+    "JudgeResult": {
+      "additionalProperties": false,
+      "description": "The structured output for evaluating the quality of the generated response.",
+      "properties": {
+        "reasons": {
+          "description": "A list of specific reasons or observations supporting the verdict.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Reasons",
+          "type": "array"
+        },
+        "score": {
+          "description": "A numerical quality score from 0 to 100.",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Score",
+          "type": "integer"
+        },
+        "verdict": {
+          "description": "The final pass/fail status of the evaluation.",
+          "enum": [
+            "PASS",
+            "FAIL"
+          ],
+          "title": "Verdict",
+          "type": "string"
+        }
+      },
+      "required": [
+        "verdict",
+        "score"
+      ],
+      "title": "JudgeResult",
+      "type": "object"
+    },
+    "LLMOutput": {
+      "$defs": {
+        "RecommendedSkill": {
+          "additionalProperties": false,
+          "description": "Represents an individual skill recommendation with supporting evidence.",
+          "properties": {
+            "evidence": {
+              "description": "Direct phrases or snippets from the context that support this recommendation.",
+              "items": {
+                "type": "string"
+              },
+              "title": "Evidence",
+              "type": "array"
+            },
+            "reasoning": {
+              "description": "Explanation of why this skill was matched using the context.",
+              "title": "Reasoning",
+              "type": "string"
+            },
+            "relevance_score": {
+              "description": "Score between 0.0 and 1.0 indicating alignment with the query.",
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "title": "Relevance Score",
+              "type": "number"
+            },
+            "skill_name": {
+              "description": "The canonical name of the recommended skill.",
+              "title": "Skill Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "skill_name",
+            "relevance_score",
+            "reasoning",
+            "evidence"
+          ],
+          "title": "RecommendedSkill",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "The primary structured output for skill recommendations.",
+      "properties": {
+        "analysis_summary": {
+          "description": "A concise summary of the overall matching process and findings.",
+          "title": "Analysis Summary",
+          "type": "string"
+        },
+        "recommended_skills": {
+          "description": "A list of skills recommended based on the user query and context, sorted by relevance.",
+          "items": {
+            "$ref": "#/$defs/RecommendedSkill"
+          },
+          "title": "Recommended Skills",
+          "type": "array"
+        }
+      },
+      "required": [
+        "analysis_summary",
+        "recommended_skills"
+      ],
+      "title": "LLMOutput",
+      "type": "object"
+    }
+  },
+  "title": "LLM Schema",
+  "type": "object"
+}
