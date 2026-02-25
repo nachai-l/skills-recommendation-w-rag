@@ -2,10 +2,10 @@
   "models": {
     "JudgeResult": {
       "additionalProperties": false,
-      "description": "The structured output for evaluating the quality of a generation.",
+      "description": "The outcome of an automated evaluation of the LLM generation quality.",
       "properties": {
         "reasons": {
-          "description": "A list of specific justifications for the assigned verdict and score.",
+          "description": "A list of specific justifications for the given verdict and score.",
           "items": {
             "type": "string"
           },
@@ -13,14 +13,14 @@
           "type": "array"
         },
         "score": {
-          "description": "A numeric score between 0 and 100 representing the quality of the output.",
+          "description": "A quality score from 0 to 100.",
           "maximum": 100,
           "minimum": 0,
           "title": "Score",
           "type": "integer"
         },
         "verdict": {
-          "description": "The final pass/fail judgment of the evaluation.",
+          "description": "The binary pass/fail result of the judge evaluation.",
           "enum": [
             "PASS",
             "FAIL"
@@ -38,12 +38,12 @@
     },
     "LLMOutput": {
       "$defs": {
-        "RecommendedSkill": {
+        "SkillItem": {
           "additionalProperties": false,
           "description": "Represents an individual skill recommendation with supporting evidence.",
           "properties": {
             "evidence": {
-              "description": "Direct phrases or snippets from the context that support this recommendation.",
+              "description": "Direct snippets or phrases from the retrieved context that support the recommendation.",
               "items": {
                 "type": "string"
               },
@@ -51,12 +51,12 @@
               "type": "array"
             },
             "reasoning": {
-              "description": "Explanation of why this skill is relevant based on the context.",
+              "description": "Justification for why this skill was selected based on the user query.",
               "title": "Reasoning",
               "type": "string"
             },
             "relevance_score": {
-              "description": "A score between 0.0 and 1.0 indicating the strength of the match.",
+              "description": "A score between 0.0 and 1.0 representing the strength of the match.",
               "maximum": 1.0,
               "minimum": 0.0,
               "title": "Relevance Score",
@@ -74,22 +74,22 @@
             "reasoning",
             "evidence"
           ],
-          "title": "RecommendedSkill",
+          "title": "SkillItem",
           "type": "object"
         }
       },
       "additionalProperties": false,
-      "description": "The structured output for the skill intelligence engine generation.",
+      "description": "The structured response containing skill intelligence analysis and recommendations.",
       "properties": {
         "analysis_summary": {
-          "description": "A concise summary of the overall matching analysis (2-5 sentences).",
+          "description": "A concise summary of the skill matching analysis performed.",
           "title": "Analysis Summary",
           "type": "string"
         },
         "recommended_skills": {
-          "description": "A list of skills recommended based on the user query and context, sorted by relevance.",
+          "description": "A list of skills identified as relevant, sorted by relevance score.",
           "items": {
-            "$ref": "#/$defs/RecommendedSkill"
+            "$ref": "#/$defs/SkillItem"
           },
           "title": "Recommended Skills",
           "type": "array"

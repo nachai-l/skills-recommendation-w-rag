@@ -178,6 +178,9 @@ def build_corpus_rows(
     - embeddings doc and bm25 doc are intentionally different:
       * embeddings doc: rich + criteria
       * bm25 doc: compact (title + short skill_text)
+    - HOWEVER: bm25_rows should still carry criteria fields as extra JSON keys
+      so Pipeline 4a/4b can build full context even for BM25-only hits.
+      (Criteria must NOT be appended into bm25["text"], to preserve Option A.)
     """
     criteria_cols = criteria_cols or _DEFAULT_CRITERIA_COLS
 
@@ -188,6 +191,9 @@ def build_corpus_rows(
     for _, r in df.iterrows():
         row = r.to_dict()
 
+        # -------------------------
+        # (1) Embedding document (rich)
+        # -------------------------
         emb_doc = build_skill_document_text_for_embedding(
             row,
             id_col=id_col,
@@ -198,7 +204,9 @@ def build_corpus_rows(
         )
         docs.append(emb_doc)
 
-        # Meta rows aligned to FAISS internal ids
+        # -------------------------
+        # (2) FAISS meta (rich context fields)
+        # -------------------------
         meta: Dict[str, Any] = {
             "skill_id": to_context_str(row.get(id_col)),
             "skill_name": to_context_str(row.get(title_col)),
@@ -206,12 +214,15 @@ def build_corpus_rows(
         }
         if source_col:
             meta["source"] = to_context_str(row.get(source_col))
+
         for c in criteria_cols:
-            if c in row:
-                meta[c] = to_context_str(row.get(c))
+            # Keep keys stable; if missing in row, store empty string for consistency
+            meta[c] = to_context_str(row.get(c))
         meta_rows.append(meta)
 
-        # BM25 corpus rows (compact text)
+        # -------------------------
+        # (3) BM25 doc text (compact, searchable)
+        # -------------------------
         bm25_doc = build_skill_document_text_for_bm25(
             row,
             title_col=title_col,
@@ -220,13 +231,21 @@ def build_corpus_rows(
             mode=bm25_doc_mode,
         )
 
+        # -------------------------
+        # (4) BM25 row (compact text + rich extra fields for context)
+        # -------------------------
         bm25: Dict[str, Any] = {
             "id": to_context_str(row.get(id_col)),
             "title": to_context_str(row.get(title_col)),
-            "text": bm25_doc,
+            "text": bm25_doc,  # searchable BM25 text (keep compact!)
         }
         if source_col:
             bm25["source"] = to_context_str(row.get(source_col))
+
+        # Add criteria fields as extra JSON keys (NOT appended into "text")
+        for c in criteria_cols:
+            bm25[c] = to_context_str(row.get(c))
+
         bm25_rows.append(bm25)
 
     return docs, meta_rows, bm25_rows
