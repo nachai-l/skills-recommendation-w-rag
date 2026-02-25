@@ -91,13 +91,21 @@ def test_error_response_does_not_leak_details():
     app = create_app()
     client = TestClient(app)
 
-    response = client.post(
-        "/v1/recommend-skills",
-        json={"query": "data scientist", "top_k": 5},
-    )
+    sensitive_message = "FileNotFoundError: /home/user/configs/credentials.yaml not found"
+    with patch(
+        "app.main.run_pipeline_5_api_payload",
+        side_effect=RuntimeError(sensitive_message),
+    ):
+        response = client.post(
+            "/v1/recommend-skills",
+            json={"query": "data scientist", "top_k": 5},
+        )
 
     assert response.status_code == 500
     detail = response.json()["detail"]
     assert detail == "Internal server error"
+    # Sensitive info must not appear in the response
     assert "configs/" not in detail
+    assert "credentials" not in detail
     assert "Traceback" not in detail
+    assert sensitive_message not in detail
