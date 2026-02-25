@@ -2,10 +2,10 @@
   "models": {
     "JudgeResult": {
       "additionalProperties": false,
-      "description": "The structured output for evaluating the quality of the generated response.",
+      "description": "The structured output for evaluating the quality of a generation.",
       "properties": {
         "reasons": {
-          "description": "A list of specific reasons or observations supporting the verdict.",
+          "description": "A list of specific justifications for the assigned verdict and score.",
           "items": {
             "type": "string"
           },
@@ -13,14 +13,14 @@
           "type": "array"
         },
         "score": {
-          "description": "A numerical quality score from 0 to 100.",
+          "description": "A numeric score between 0 and 100 representing the quality of the output.",
           "maximum": 100,
           "minimum": 0,
           "title": "Score",
           "type": "integer"
         },
         "verdict": {
-          "description": "The final pass/fail status of the evaluation.",
+          "description": "The final pass/fail judgment of the evaluation.",
           "enum": [
             "PASS",
             "FAIL"
@@ -51,12 +51,12 @@
               "type": "array"
             },
             "reasoning": {
-              "description": "Explanation of why this skill was matched using the context.",
+              "description": "Explanation of why this skill is relevant based on the context.",
               "title": "Reasoning",
               "type": "string"
             },
             "relevance_score": {
-              "description": "Score between 0.0 and 1.0 indicating alignment with the query.",
+              "description": "A score between 0.0 and 1.0 indicating the strength of the match.",
               "maximum": 1.0,
               "minimum": 0.0,
               "title": "Relevance Score",
@@ -79,10 +79,10 @@
         }
       },
       "additionalProperties": false,
-      "description": "The primary structured output for skill recommendations.",
+      "description": "The structured output for the skill intelligence engine generation.",
       "properties": {
         "analysis_summary": {
-          "description": "A concise summary of the overall matching process and findings.",
+          "description": "A concise summary of the overall matching analysis (2-5 sentences).",
           "title": "Analysis Summary",
           "type": "string"
         },

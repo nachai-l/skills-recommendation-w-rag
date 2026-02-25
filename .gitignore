@@ -14,14 +14,18 @@ __pycache__/
 # Keep large/private data out of public repo
 raw_data/skill_taxonomy.csv
 
-# Generated artifacts (ignore everything inside, except .gitkeep)
-artifacts/*
-archived/*
+# Generated artifacts (ignore contents)
+artifacts/**
+archived/**
 
-# Allow folder keepers (must also unignore dirs to reach the file)
-!artifacts/
-!archived/
-!artifacts/**/
-!archived/**/
+# Keep folder structure
 !artifacts/**/.gitkeep
 !archived/**/.gitkeep
+
+# Never commit embedding cache
+artifacts/cache/embeddings/**/*.npy
+
+# Optional: local pytest/cache noise
+.pytest_cache/
+.coverage
+htmlcov/

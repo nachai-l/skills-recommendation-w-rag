@@ -1,3 +1,4 @@
+# functions/core/ingestion.py
 from __future__ import annotations
 
 """
@@ -17,10 +18,6 @@ Responsibilities (core, not orchestrator)
   - bm25_corpus.jsonl
   - bm25_stats.json    (minimal stats)
   - manifest.json      (traceability)
-
-Non-responsibilities
-- Reading parameters.yaml (pipeline will do)
-- Reading the input table (pipeline will do)
 """
 
 import json
@@ -33,11 +30,10 @@ import pandas as pd
 import faiss
 
 from functions.utils.text import normalize_ws, to_context_str
-# from functions.utils.text_embeddings import build_embedding_model
 
 
 # --------------------------------------------------------------------------------------
-# Config helpers (dict-like access to params without hard dependency on config models)
+# Config helpers
 # --------------------------------------------------------------------------------------
 def _cfg_get(cfg: Dict[str, Any], keys: Iterable[str], default: Any = None) -> Any:
     cur: Any = cfg
@@ -83,7 +79,7 @@ _DEFAULT_CRITERIA_COLS = [
 ]
 
 
-def build_skill_document_text(
+def build_skill_document_text_for_embedding(
     row: Dict[str, Any],
     *,
     id_col: str,
@@ -93,11 +89,12 @@ def build_skill_document_text(
     criteria_cols: Optional[List[str]] = None,
 ) -> str:
     """
-    Build a deterministic document string for embeddings/BM25.
+    Rich document for embeddings (vector retrieval).
 
-    Notes
-    - Uses normalize_ws() on derived strings only.
-    - Does not mutate the input row.
+    Includes:
+    - skill_id / skill_name / source
+    - skill_text
+    - criteria blocks
     """
     criteria_cols = criteria_cols or _DEFAULT_CRITERIA_COLS
 
@@ -118,7 +115,6 @@ def build_skill_document_text(
         parts.append("skill_text:")
         parts.append(normalize_ws(text))
 
-    # Criteria blocks (keep stable order)
     crit_chunks: List[str] = []
     for c in criteria_cols:
         v = to_context_str(row.get(c))
@@ -129,8 +125,36 @@ def build_skill_document_text(
         parts.append("criteria:")
         parts.extend(crit_chunks)
 
-    # Final doc
     return "\n".join(parts).strip() or " "
+
+
+def build_skill_document_text_for_bm25(
+    row: Dict[str, Any],
+    *,
+    title_col: str,
+    text_col: str,
+    max_text_chars: int = 800,
+    mode: str = "title_plus_text",  # title_only | title_plus_text
+) -> str:
+    """
+    Compact document for BM25 (lexical retrieval).
+
+    Default: title + truncated skill_text.
+    Excludes: criteria blocks and scaffolding labels.
+    """
+    title = normalize_ws(to_context_str(row.get(title_col)))
+    text = normalize_ws(to_context_str(row.get(text_col)))
+
+    if mode == "title_only":
+        return title or " "
+
+    # title_plus_text
+    if max_text_chars and max_text_chars > 0 and len(text) > max_text_chars:
+        text = text[:max_text_chars].rstrip()
+
+    if title and text:
+        return f"{title}\n{text}".strip() or " "
+    return (title or text or " ").strip() or " "
 
 
 def build_corpus_rows(
@@ -141,12 +165,19 @@ def build_corpus_rows(
     text_col: str,
     source_col: Optional[str],
     criteria_cols: Optional[List[str]] = None,
+    bm25_doc_mode: str = "title_plus_text",
+    bm25_max_text_chars: int = 800,
 ) -> Tuple[List[str], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     Build:
     - documents: List[str] (for embeddings)
     - faiss_meta_rows: List[dict] aligned to doc order
     - bm25_rows: List[dict] aligned to doc order
+
+    Important:
+    - embeddings doc and bm25 doc are intentionally different:
+      * embeddings doc: rich + criteria
+      * bm25 doc: compact (title + short skill_text)
     """
     criteria_cols = criteria_cols or _DEFAULT_CRITERIA_COLS
 
@@ -154,11 +185,10 @@ def build_corpus_rows(
     meta_rows: List[Dict[str, Any]] = []
     bm25_rows: List[Dict[str, Any]] = []
 
-    # Deterministic: preserve df row order
     for _, r in df.iterrows():
         row = r.to_dict()
 
-        doc = build_skill_document_text(
+        emb_doc = build_skill_document_text_for_embedding(
             row,
             id_col=id_col,
             title_col=title_col,
@@ -166,9 +196,9 @@ def build_corpus_rows(
             source_col=source_col,
             criteria_cols=criteria_cols,
         )
-        docs.append(doc)
+        docs.append(emb_doc)
 
-        # Meta rows are for online: keep minimal + useful fields
+        # Meta rows aligned to FAISS internal ids
         meta: Dict[str, Any] = {
             "skill_id": to_context_str(row.get(id_col)),
             "skill_name": to_context_str(row.get(title_col)),
@@ -179,14 +209,21 @@ def build_corpus_rows(
         for c in criteria_cols:
             if c in row:
                 meta[c] = to_context_str(row.get(c))
-
         meta_rows.append(meta)
 
-        # BM25 corpus rows
+        # BM25 corpus rows (compact text)
+        bm25_doc = build_skill_document_text_for_bm25(
+            row,
+            title_col=title_col,
+            text_col=text_col,
+            max_text_chars=bm25_max_text_chars,
+            mode=bm25_doc_mode,
+        )
+
         bm25: Dict[str, Any] = {
             "id": to_context_str(row.get(id_col)),
             "title": to_context_str(row.get(title_col)),
-            "text": doc,  # BM25 corpus uses the same doc text for now
+            "text": bm25_doc,
         }
         if source_col:
             bm25["source"] = to_context_str(row.get(source_col))
@@ -212,19 +249,6 @@ def build_and_persist_indexes(
     *,
     embedder: Optional[Any] = None,
 ) -> IngestionResult:
-    """
-    Core ingestion entrypoint.
-
-    cfg expects (dict-like, matching parameters.yaml structure):
-      - rag.corpus.{id_col,title_col,text_col,source_col}
-      - embeddings.{model_name,dim,task_type,normalize}
-      - index_store.{faiss.index_path, faiss.meta_path, bm25.corpus_path, bm25.stats_path}
-      - index_store.dir (optional, for manifest only)
-
-    embedder:
-      - must implement: embed_documents(texts: List[str], *, task_type: str) -> np.ndarray
-      - If None, we create one from build_embedding_model() using cfg.embeddings.*
-    """
     id_col = _cfg_get(cfg, ["rag", "corpus", "id_col"], "skill_id")
     title_col = _cfg_get(cfg, ["rag", "corpus", "title_col"], "skill_name")
     text_col = _cfg_get(cfg, ["rag", "corpus", "text_col"], "skill_text")
@@ -239,18 +263,21 @@ def build_and_persist_indexes(
     if not faiss_index_path or not faiss_meta_path or not bm25_corpus_path or not bm25_stats_path:
         raise ValueError("Missing index_store paths in cfg (faiss.index_path/meta_path, bm25.corpus_path/stats_path)")
 
+    # BM25 doc shaping controls (Option A)
+    bm25_doc_mode = str(_cfg_get(cfg, ["rag", "bm25", "doc_mode"], "title_plus_text") or "title_plus_text")
+    bm25_max_text_chars = int(_cfg_get(cfg, ["rag", "bm25", "max_text_chars"], 800) or 800)
+
     docs, meta_rows, bm25_rows = build_corpus_rows(
         df,
         id_col=id_col,
         title_col=title_col,
         text_col=text_col,
         source_col=source_col,
+        bm25_doc_mode=bm25_doc_mode,
+        bm25_max_text_chars=bm25_max_text_chars,
     )
 
-    # ------------------------------------------------------------
-    # Test mode: deterministically truncate corpus BEFORE embedding
-    # (must truncate docs + meta + bm25 together to preserve alignment)
-    # ------------------------------------------------------------
+    # Test mode truncation (keeps alignment)
     test_mode = bool(_cfg_get(cfg, ["embeddings", "test_mode"], False))
     if test_mode:
         batch_size = int(_cfg_get(cfg, ["embeddings", "batch_size"], 128) or 128)
@@ -269,7 +296,6 @@ def build_and_persist_indexes(
     if embedder is None:
         from functions.utils.text_embeddings import build_embedding_model
 
-        # ✅ define these first (fix "Unresolved reference")
         model_name = _cfg_get(cfg, ["embeddings", "model_name"], "gemini-embedding-001")
         out_dim_raw = _cfg_get(cfg, ["embeddings", "dim"], None)
         out_dim = int(out_dim_raw) if out_dim_raw not in (None, 0, "0", "") else None
@@ -304,16 +330,13 @@ def build_and_persist_indexes(
 
     n, d = int(emb.shape[0]), int(emb.shape[1])
 
-    # Build FAISS index (exact, deterministic)
     index = faiss.IndexFlatIP(d)
     index.add(np.ascontiguousarray(emb, dtype=np.float32))
 
-    # Persist FAISS index + meta
     _ensure_parent_dir(faiss_index_path)
     faiss.write_index(index, str(faiss_index_path))
     _write_jsonl(faiss_meta_path, meta_rows)
 
-    # Persist BM25 corpus + minimal stats
     _write_jsonl(bm25_corpus_path, bm25_rows)
 
     stats = {
@@ -323,6 +346,8 @@ def build_and_persist_indexes(
         "title_col": title_col,
         "text_col": text_col,
         "source_col": source_col,
+        "bm25_doc_mode": bm25_doc_mode,
+        "bm25_max_text_chars": bm25_max_text_chars,
         "bm25_row_schema": list(bm25_rows[0].keys()) if bm25_rows else [],
     }
     _ensure_parent_dir(bm25_stats_path)
@@ -345,6 +370,10 @@ def build_and_persist_indexes(
             "text_col": text_col,
             "source_col": source_col,
         },
+        "bm25": {
+            "doc_mode": bm25_doc_mode,
+            "max_text_chars": bm25_max_text_chars,
+        },
         "paths": {
             "index_store_dir": index_store_dir,
             "faiss_index_path": str(faiss_index_path),
@@ -354,7 +383,6 @@ def build_and_persist_indexes(
         },
     }
 
-    # Persist manifest next to index_store.dir if available, else next to faiss index.
     if index_store_dir:
         manifest_path = str(Path(index_store_dir) / "manifest.json")
     else:
@@ -372,7 +400,6 @@ def build_and_persist_indexes(
         "manifest_path": str(manifest_path),
     }
 
-    # Alignment guard (quick sanity)
     re_meta = _read_jsonl(faiss_meta_path)
     if len(re_meta) != n:
         raise RuntimeError(f"faiss_meta.jsonl length mismatch: len(meta)={len(re_meta)} vs n={n}")
@@ -382,7 +409,8 @@ def build_and_persist_indexes(
 
 __all__ = [
     "IngestionResult",
-    "build_skill_document_text",
+    "build_skill_document_text_for_embedding",
+    "build_skill_document_text_for_bm25",
     "build_corpus_rows",
     "build_and_persist_indexes",
 ]

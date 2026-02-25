@@ -110,7 +110,7 @@ embeddings:
   task_type: SEMANTIC_SIMILARITY
   max_workers: 5
   cache_dir: artifacts/cache/embeddings
-  report_log_per_n_batch: 10
+  report_log_per_n_batch: 100
   test_mode: false
   test_max_iteration: 30
 
@@ -129,6 +129,8 @@ rag:
     source_col: source
 
   bm25:
+    doc_mode: title_plus_text
+    max_text_chars: 1000
     k1: 1.5
     b: 0.75
     tokenizer: simple               # simple | whitespace | custom
