@@ -4,13 +4,24 @@ __pycache__/
 .venv/
 .env
 
-# Artifacts / outputs / caches
-artifacts/
-archived/
+# OS
+.DS_Store
 
 # IDE
 .vscode/
 .idea/
 
-# OS
-.DS_Store
+# Keep large/private data out of public repo
+raw_data/skill_taxonomy.csv
+
+# Generated artifacts (ignore everything inside, except .gitkeep)
+artifacts/*
+archived/*
+
+# Allow folder keepers (must also unignore dirs to reach the file)
+!artifacts/
+!archived/
+!artifacts/**/
+!archived/**/
+!artifacts/**/.gitkeep
+!archived/**/.gitkeep
