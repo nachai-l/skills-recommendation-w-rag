@@ -66,7 +66,7 @@ def load_schema_model(schema_py_path: str | Path, *, model_name: str = "Output")
     """
     Load schema/llm_schema.py and return the Pydantic model class.
 
-    Default export expected: `Output`.
+    Default export expected: `LLMOutput`.
 
     Safety:
     - Performs an AST allowlist validation before executing schema code.

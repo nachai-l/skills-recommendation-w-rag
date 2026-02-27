@@ -51,7 +51,7 @@ def run_pipeline_4b_generate(
       debug: include debug fields
       parameters_path: path to parameters.yaml
       credentials_path: path to credentials.yaml
-      schema_model_name: exported Pydantic model name in schema/llm_schema.py (default: Output)
+      schema_model_name: exported Pydantic model name in schema/llm_schema.py (default: LLMOutput)
       include_retrieval_results: include retrieval_results + context in output payload
       top_k_vector/top_k_bm25: retrieval depths for 4a (optional)
 
