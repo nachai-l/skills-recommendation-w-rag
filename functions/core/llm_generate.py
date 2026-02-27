@@ -62,7 +62,7 @@ def _load_yaml(path: str | Path) -> Dict[str, Any]:
 # -----------------------------
 # Schema loader (Pydantic model)
 # -----------------------------
-def load_schema_model(schema_py_path: str | Path, *, model_name: str = "Output") -> Type[BaseModel]:
+def load_schema_model(schema_py_path: str | Path, *, model_name: str = "LLMOutput") -> Type[BaseModel]:
     """
     Load schema/llm_schema.py and return the Pydantic model class.
 
