@@ -216,15 +216,36 @@ def validate_schema_ast(code: str) -> None:
     """
     Static AST safety check for LLM-generated schema code.
 
-    Raises ValueError describing the first violation found. Must be called
-    BEFORE exec_module / importlib execution of the generated file.
+    Parses ``code`` and verifies it meets strict structural and content rules.
+    Must be called *before* executing or importing the generated file via
+    ``exec_module`` / ``importlib``.
 
-    Rules enforced:
-    - Only imports from __future__, typing, pydantic are allowed.
-    - Dangerous builtins and module names are forbidden anywhere in the AST.
-    - Only imports, class definitions, simple assignments, and module-level
-      docstrings are allowed at the top level (no function defs, no bare
-      expression statements other than string literals).
+    Top-level node rules:
+        Permitted: ``import``, ``from ... import``, class definitions,
+        simple assignments (``ast.Assign`` / ``ast.AnnAssign``), and
+        ``ast.Expr`` nodes that wrap a bare string constant (i.e. module-level
+        docstrings, as determined by :func:`_is_docstring_expr`).
+        Forbidden: function definitions, decorated definitions, bare calls
+        (e.g. ``print()``, ``eval()``), and all other statement types.
+
+    Import allowlist:
+        Only ``__future__``, ``typing``, and ``pydantic`` may be imported
+        (checked by root module name).
+
+    Name/attribute blocklist:
+        The following names are forbidden *anywhere* in the AST, including
+        inside class bodies: ``eval``, ``exec``, ``compile``, ``open``,
+        ``__import__``, ``os``, ``sys``, ``subprocess``, ``socket``,
+        ``shutil``, ``importlib``, ``builtins``, ``globals``, ``locals``,
+        ``vars``, ``getattr``, ``setattr``, ``delattr``.
+
+    Args:
+        code: Python source code string to validate.
+
+    Raises:
+        ValueError: On the first violation found, with a message describing
+            the disallowed construct, import, or name. Also raised if
+            ``code`` contains a syntax error.
     """
     try:
         tree = ast.parse(code)
