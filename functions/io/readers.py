@@ -1,42 +1,41 @@
 # functions/io/readers.py
 """
-Reader (Unified CSV/TSV/PSV/XLSX + JSON)
+Unified table + JSON readers (CSV/TSV/PSV/XLSX + JSON)
 
 Intent
-- Provide a unified reader for multiple input formats, driven by parameters.yaml:
-  - csv / tsv / psv
+- Provide a single entrypoint for reading tabular inputs defined in `parameters.yaml`:
+  - csv / tsv / psv (delimiter-driven)
   - xlsx with configurable sheet (default: "sheet1")
-- Provide a thin JSON reader for pipeline artifacts (e.g., pipeline2_input.json)
+- Provide a thin JSON reader for pipeline artifacts (e.g., cached outputs, manifests).
 
 External calls
 - pandas.read_csv / pandas.read_excel
 - json.loads
-- functions.utils.text.trim_lr (used for trimming column headers only)
+- functions.utils.text.trim_lr (used ONLY for trimming column headers)
 
 Primary functions
 - read_input_table(path, fmt, sheet_name=None, encoding="utf-8") -> pandas.DataFrame
-- validate_required_columns(df, required_columns) -> None (raise ValueError if missing)
+- validate_required_columns(df, required_columns) -> None
 - read_json(path, encoding="utf-8") -> Any
 
 Key behaviors / guarantees
-- **File existence check**: raises FileNotFoundError if the input file path does not exist.
-- **Supported formats**: csv, tsv, psv, xlsx (case-insensitive).
-- **Delimiter mapping**:
+- File existence checks raise FileNotFoundError with a clear path.
+- Supported formats: csv, tsv, psv, xlsx (case-insensitive).
+- Delimiter mapping:
   - csv -> ","
   - tsv -> "\\t"
   - psv -> "|"
-- **No cell-value trimming**:
-  - This reader intentionally does not trim cell values to preserve traceability.
-  - Only column names are trimmed defensively.
-
-JSON reader
-- read_json() is for pipeline artifacts and config-like blobs.
-- No schema enforcement; callers validate shape.
+- No cell-value trimming:
+  - Cell values are NOT trimmed to preserve traceability.
+  - Only column names are trimmed defensively (common issue in CSV exports).
 
 Validation
-- validate_required_columns(df, required_columns):
-  - Computes missing columns by exact name match against df.columns.
-  - Raises ValueError with both missing and found columns for debugging.
+- validate_required_columns():
+  - Exact-name match against df.columns (no aliasing).
+  - Raises ValueError containing both missing and found columns for fast debugging.
+
+JSON reader
+- read_json() is intentionally schema-agnostic; callers validate shape/types.
 """
 
 from __future__ import annotations

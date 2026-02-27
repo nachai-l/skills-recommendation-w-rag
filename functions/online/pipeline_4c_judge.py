@@ -1,4 +1,24 @@
-# scripts/run_pipeline_4c_force.py
+# functions/online/pipeline_4c_judge.py
+"""
+Pipeline 4c — judge wrapper (online)
+
+Intent
+- Provide a thin ONLINE wrapper for judge validation (pipeline 4c).
+- Reuse (or produce) pipeline 4b output, then delegate all judge work to:
+    functions/core/llm_judge.py
+
+Responsibilities
+- Load parameters.yaml (typed config)
+- Resolve repo_root (CWD-independent)
+- Obtain generation payload (p4b):
+  - reuse caller-provided `p4b_payload` when available (avoids re-running 4b)
+  - otherwise run pipeline_4b_generate(...)
+- Extract (llm_validated, context) from p4b and call run_pipeline_4c_judge_core(...)
+- Attach traceability fields (generation_cache_id) and debug flags
+
+Notes
+- Judge usually requires context, so include_retrieval_results defaults to True.
+"""
 from __future__ import annotations
 
 from typing import Any, Dict, Optional
@@ -24,15 +44,15 @@ def run_pipeline_4c_judge(
     include_retrieval_results: bool = True,  # judge usually needs context
     top_k_vector: Optional[int] = None,
     top_k_bm25: Optional[int] = None,
-    # NEW: allow caller to provide an existing 4b payload to avoid re-running 4b
+    # Allow caller to provide an existing 4b payload to avoid re-running 4b
     p4b_payload: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
-    Pipeline 4c — Judge validation.
+    Run judge validation (pipeline 4c).
 
     Optimization:
-    - If p4b_payload is provided, reuse it (avoids re-running Pipeline 4b).
-    - Otherwise, run Pipeline 4b to obtain llm_validated + context for judging.
+    - If p4b_payload is provided, reuse it (avoids re-running pipeline 4b).
+    - Otherwise, run pipeline 4b to obtain llm_validated + context for judging.
     """
     params = load_parameters(parameters_path)
     repo_root = repo_root_from_parameters_path(parameters_path)

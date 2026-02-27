@@ -1,34 +1,34 @@
 # functions/llm/client.py
 """
-Gemini Client Factory (`google.genai`)
+Gemini client factory (google.genai)
 
 Intent
-- Construct a Gemini client context in a single, reusable place.
-- Standardize how this project resolves:
-  - model name selection
-  - authentication (API key via environment variable)
+- Centralize construction of a Gemini client context for this repository.
+- Standardize resolution of:
+  - model name
+  - authentication (API key from environment variable)
   - config inputs (supports dicts and typed config objects)
 
-Design Principles
-- **No network calls** are performed here. This module only prepares a client context
-  that downstream code can use to make requests.
-- **Secrets are never read from files**. The API key must come from an environment
-  variable (e.g., `GEMINI_API_KEY`), whose name is provided by `credentials.yaml`.
+Design principles
+- No network calls are performed here; this module only prepares a client instance
+  and resolves configuration values.
+- Secrets are never read from files. The API key must be provided via an environment
+  variable (e.g., `GEMINI_API_KEY`), whose name is declared in `credentials.yaml`.
 
-Configuration Inputs
+Configuration inputs
 - `credentials_config` may be:
   1) a full credentials object with `.gemini`
   2) an object/dict already representing the `gemini` section
   3) a dict like `{"gemini": {...}}`
 
-Model Name Resolution (priority order)
-1) `model_name_override` (typically provided by `parameters.yaml`)
+Model name resolution (priority order)
+1) `model_name_override` (typically from parameters.yaml)
 2) `credentials_config.gemini.model_name` (if present)
 3) environment variable `GEMINI_MODEL`
 
 Primary API
-- `get_model_name(credentials_config, model_name_override=None) -> str`
-- `build_gemini_client(credentials_config, model_name_override=None) -> dict`
+- get_model_name(credentials_config, model_name_override=None) -> str
+- build_gemini_client(credentials_config, model_name_override=None) -> dict
     Returns:
       {
         "client": genai.Client,
@@ -36,9 +36,9 @@ Primary API
       }
 
 Dependencies
-- `google.genai` (Gemini SDK)
-- `os.environ` for secret retrieval
-- `functions.utils.logging.get_logger` for optional logging
+- google.genai (Gemini SDK)
+- os.environ for secret retrieval
+- functions.utils.logging.get_logger for optional logging
 """
 
 from __future__ import annotations
@@ -52,6 +52,7 @@ from functions.utils.logging import get_logger
 
 
 def _get(obj: Any, key: str, default=None):
+    """Best-effort getter supporting dicts and attribute-style config objects."""
     if obj is None:
         return default
     if isinstance(obj, dict):
@@ -106,9 +107,11 @@ def build_gemini_client(
     model_name_override: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Build Gemini client context.
+    Build a Gemini client context (client + resolved model name).
 
-    No network calls are made here.
+    Notes:
+    - This function does not make any network calls.
+    - API key is retrieved from an environment variable specified by credentials config.
     """
     logger = get_logger(__name__)
 
@@ -124,6 +127,7 @@ def build_gemini_client(
 
     model_name = get_model_name(credentials_config, model_name_override=model_name_override)
 
+    # Keep logs non-sensitive; do not log API key or full credential blobs.
     # logger.info("Initializing Gemini client (model=%s)", model_name)
 
     client = genai.Client(api_key=api_key)

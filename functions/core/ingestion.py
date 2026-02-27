@@ -1,24 +1,29 @@
 # functions/core/ingestion.py
-from __future__ import annotations
-
 """
-functions.core.ingestion
+Core ingestion + index building (Pipeline 2).
 
-Core ingestion + index building logic (used by Pipeline 2).
+Intent
+- Build deterministic document representations per skill row for:
+  - Vector retrieval (FAISS embeddings + IndexFlatIP)
+  - Lexical retrieval (BM25 corpus JSONL)
+- Persist a complete retrieval artifact set (FAISS index + meta, BM25 corpus + stats, manifest).
 
 Responsibilities (core, not orchestrator)
-- Build deterministic "document text" per skill row for:
-  - FAISS embedding index (vector retrieval)
-  - BM25 corpus (lexical retrieval)
-- Embed documents (dependency-injected embedder)
-- Build FAISS IndexFlatIP (assumes vectors are L2-normalized)
-- Persist:
-  - faiss.index
-  - faiss_meta.jsonl   (row order aligned to FAISS internal ids)
-  - bm25_corpus.jsonl
-  - bm25_stats.json    (minimal stats)
-  - manifest.json      (traceability)
+- Construct:
+  - embedding docs (rich: id/name/source + skill_text + criteria)
+  - BM25 docs (compact: title + truncated skill_text)
+- Embed documents (via dependency-injected embedder)
+- Build FAISS IndexFlatIP (assumes vectors are L2-normalized upstream)
+- Persist artifacts with alignment invariants:
+  - faiss_meta.jsonl row order aligns to FAISS internal ids
+  - bm25_corpus.jsonl includes compact searchable text PLUS rich fields for context rendering
+- Emit a manifest.json for traceability.
+
+Notes
+- Online code must NOT embed here; this module is batch-only (pipeline 2).
 """
+
+from __future__ import annotations
 
 import json
 from dataclasses import dataclass
@@ -36,6 +41,7 @@ from functions.utils.text import normalize_ws, to_context_str
 # Config helpers
 # --------------------------------------------------------------------------------------
 def _cfg_get(cfg: Dict[str, Any], keys: Iterable[str], default: Any = None) -> Any:
+    """Nested dict getter for cfg dicts (missing -> default)."""
     cur: Any = cfg
     for k in keys:
         if not isinstance(cur, dict) or k not in cur:
@@ -45,10 +51,12 @@ def _cfg_get(cfg: Dict[str, Any], keys: Iterable[str], default: Any = None) -> A
 
 
 def _ensure_parent_dir(path: str | Path) -> None:
+    """Create parent directory for a file path (idempotent)."""
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
 
 def _write_jsonl(path: str | Path, rows: List[Dict[str, Any]]) -> None:
+    """Write JSONL (UTF-8, ensure_ascii=False), one object per line."""
     _ensure_parent_dir(path)
     with open(path, "w", encoding="utf-8") as f:
         for r in rows:
@@ -56,6 +64,7 @@ def _write_jsonl(path: str | Path, rows: List[Dict[str, Any]]) -> None:
 
 
 def _read_jsonl(path: str | Path) -> List[Dict[str, Any]]:
+    """Read JSONL into a list of dict rows."""
     rows: List[Dict[str, Any]] = []
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
@@ -89,12 +98,12 @@ def build_skill_document_text_for_embedding(
     criteria_cols: Optional[List[str]] = None,
 ) -> str:
     """
-    Rich document for embeddings (vector retrieval).
+    Build a rich document string for embeddings (vector retrieval).
 
     Includes:
     - skill_id / skill_name / source
-    - skill_text
-    - criteria blocks
+    - skill_text (normalized whitespace)
+    - criteria blocks (normalized whitespace)
     """
     criteria_cols = criteria_cols or _DEFAULT_CRITERIA_COLS
 
@@ -137,10 +146,10 @@ def build_skill_document_text_for_bm25(
     mode: str = "title_plus_text",  # title_only | title_plus_text
 ) -> str:
     """
-    Compact document for BM25 (lexical retrieval).
+    Build a compact document string for BM25 (lexical retrieval).
 
     Default: title + truncated skill_text.
-    Excludes: criteria blocks and scaffolding labels.
+    Excludes: criteria blocks and scaffolding labels (keeps lexical surface clean).
     """
     title = normalize_ws(to_context_str(row.get(title_col)))
     text = normalize_ws(to_context_str(row.get(text_col)))
@@ -170,17 +179,18 @@ def build_corpus_rows(
 ) -> Tuple[List[str], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     Build:
-    - documents: List[str] (for embeddings)
-    - faiss_meta_rows: List[dict] aligned to doc order
-    - bm25_rows: List[dict] aligned to doc order
+    - docs: List[str] embedding docs (rich)
+    - meta_rows: List[dict] FAISS metadata aligned to doc order
+    - bm25_rows: List[dict] BM25 corpus rows aligned to doc order
 
-    Important:
-    - embeddings doc and bm25 doc are intentionally different:
+    Important design choice:
+    - Embedding docs and BM25 docs are intentionally different:
       * embeddings doc: rich + criteria
-      * bm25 doc: compact (title + short skill_text)
-    - HOWEVER: bm25_rows should still carry criteria fields as extra JSON keys
-      so Pipeline 4a/4b can build full context even for BM25-only hits.
-      (Criteria must NOT be appended into bm25["text"], to preserve Option A.)
+      * bm25 text: compact (title + short skill_text) for lexical relevance
+
+    BM25 context support:
+    - bm25_rows carry criteria fields as extra JSON keys (NOT appended into bm25["text"]),
+      so downstream pipeline 4a/4b can still build full context for BM25-only hits.
     """
     criteria_cols = criteria_cols or _DEFAULT_CRITERIA_COLS
 
@@ -256,6 +266,7 @@ def build_corpus_rows(
 # --------------------------------------------------------------------------------------
 @dataclass
 class IngestionResult:
+    """Return value for pipeline 2 core build: paths + manifest + basic stats."""
     num_docs: int
     dim: int
     paths: Dict[str, str]
@@ -268,6 +279,13 @@ def build_and_persist_indexes(
     *,
     embedder: Optional[Any] = None,
 ) -> IngestionResult:
+    """
+    Build FAISS + BM25 artifacts from a corpus dataframe and persist them to disk.
+
+    Notes:
+    - embedder is dependency-injected for testing; if None, this builds a default embedder
+      from `functions.utils.text_embeddings`.
+    """
     id_col = _cfg_get(cfg, ["rag", "corpus", "id_col"], "skill_id")
     title_col = _cfg_get(cfg, ["rag", "corpus", "title_col"], "skill_name")
     text_col = _cfg_get(cfg, ["rag", "corpus", "text_col"], "skill_text")
@@ -342,6 +360,7 @@ def build_and_persist_indexes(
 
     task_type = _cfg_get(cfg, ["embeddings", "task_type"], "RETRIEVAL_DOCUMENT") or "RETRIEVAL_DOCUMENT"
 
+    # Embeddings must be 2D float32 matrix aligned to docs order.
     emb = embedder.embed_documents(docs, task_type=str(task_type))
     emb = np.asarray(emb, dtype=np.float32)
     if emb.ndim != 2:
@@ -349,13 +368,16 @@ def build_and_persist_indexes(
 
     n, d = int(emb.shape[0]), int(emb.shape[1])
 
+    # FAISS IndexFlatIP (exact inner product). Assumes embeddings are L2-normalized upstream.
     index = faiss.IndexFlatIP(d)
     index.add(np.ascontiguousarray(emb, dtype=np.float32))
 
+    # Persist FAISS artifacts (alignment: internal_idx i <-> meta_rows[i]).
     _ensure_parent_dir(faiss_index_path)
     faiss.write_index(index, str(faiss_index_path))
     _write_jsonl(faiss_meta_path, meta_rows)
 
+    # Persist BM25 corpus + minimal stats.
     _write_jsonl(bm25_corpus_path, bm25_rows)
 
     stats = {
@@ -373,6 +395,7 @@ def build_and_persist_indexes(
     with open(bm25_stats_path, "w", encoding="utf-8") as f:
         json.dump(stats, f, ensure_ascii=False, indent=2)
 
+    # Manifest for traceability / debugging.
     manifest = {
         "kind": "skills_index_store",
         "backend": {"vector": "faiss", "bm25": "local"},
@@ -402,6 +425,7 @@ def build_and_persist_indexes(
         },
     }
 
+    # Default manifest location: index_store_dir/manifest.json (fallback: alongside faiss index).
     if index_store_dir:
         manifest_path = str(Path(index_store_dir) / "manifest.json")
     else:
@@ -419,6 +443,7 @@ def build_and_persist_indexes(
         "manifest_path": str(manifest_path),
     }
 
+    # Alignment guard: meta JSONL must match embedded doc count.
     re_meta = _read_jsonl(faiss_meta_path)
     if len(re_meta) != n:
         raise RuntimeError(f"faiss_meta.jsonl length mismatch: len(meta)={len(re_meta)} vs n={n}")

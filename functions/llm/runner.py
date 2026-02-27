@@ -1,27 +1,30 @@
 # functions/llm/runner.py
 """
-Gemini Prompt Runner (File-based YAML Prompt + JSON-only + Schema Validation + Cache)
+Gemini Prompt Runner (YAML Prompt + JSON Extraction + Schema Validation + Deterministic Cache)
 
 Intent
-- Provide one high-level entrypoint to run a prompt YAML file with variables,
-  call Gemini, and return **validated JSON** as a Pydantic model.
+- Provide high-level entrypoints to run a YAML prompt file with variables, call Gemini,
+  and return either:
+  - validated JSON as a Pydantic model (`run_prompt_yaml_json`)
+  - validated text output (`run_prompt_yaml_text`)
 
 This runner enforces:
-- JSON extraction (even if the model adds fences or trailing text)
+- robust JSON extraction (even if the model returns code fences or trailing text)
 - schema validation (Pydantic)
 - bounded retries with corrective instructions
 - deterministic, caller-supplied caching via `cache_id`
 - optional failure dumps for debugging
 
 Prompt format
-- Loaded from a YAML file (e.g. prompts/generation.yaml) using functions.llm.prompts:
+- Prompts are loaded from YAML files (e.g., prompts/generation.yaml) using `functions.llm.prompts`:
   - load_prompt_file(path)
   - render_prompt_blocks(prompt_dict, variables)
-- Placeholders are rendered using str.format(**variables), e.g. {context}, {llm_schema}.
+- Placeholder rendering uses the SAFE renderer by default (not `str.format`), to support
+  injected blobs containing literal braces.
 
 Caching semantics
 - HIT: cached payload exists and validates against schema
-- STALE: cached payload exists but fails schema validation -> re-call Gemini
+- STALE: cached payload exists but fails validation -> re-call Gemini
 - MISS: no cache found
 - FORCE: bypass cache read via force=True
 """
@@ -45,7 +48,7 @@ _CODE_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", flags=re.DOTALL | re.
 
 
 def _sanitize_cache_id(cache_id: str) -> str:
-    """Make cache_id filesystem-safe without hashing."""
+    """Make cache_id filesystem-safe without hashing (caller must ensure determinism)."""
     s = cache_id.strip().replace("/", "_").replace("\\", "_")
     s = re.sub(r"\s+", "_", s)
     s = re.sub(r"[^A-Za-z0-9._-]", "_", s)
@@ -53,11 +56,13 @@ def _sanitize_cache_id(cache_id: str) -> str:
 
 
 def _cache_path(cache_dir: str | Path, cache_id: str) -> Path:
+    """Resolve JSON cache path for a given cache_id."""
     cid = _sanitize_cache_id(cache_id)
     return Path(cache_dir) / f"{cid}.json"
 
 
 def _try_read_cache(cache_dir: str | Path, cache_id: Optional[str]) -> Optional[dict]:
+    """Best-effort read of cached JSON payload; returns None on any failure."""
     if not cache_id:
         return None
     p = _cache_path(cache_dir, cache_id)
@@ -70,17 +75,20 @@ def _try_read_cache(cache_dir: str | Path, cache_id: Optional[str]) -> Optional[
 
 
 def _write_cache(cache_dir: str | Path, cache_id: str, payload: dict) -> None:
+    """Write JSON cache deterministically (utf-8, sort_keys=True)."""
     p = _cache_path(cache_dir, cache_id)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8")
 
 
 def _cache_path_text(cache_dir: str | Path, cache_id: str) -> Path:
+    """Resolve text cache path for a given cache_id."""
     cid = _sanitize_cache_id(cache_id)
     return Path(cache_dir) / f"{cid}.txt"
 
 
 def _try_read_cache_text(cache_dir: str | Path, cache_id: Optional[str]) -> Optional[str]:
+    """Best-effort read of cached text output; returns None on any failure."""
     if not cache_id:
         return None
     p = _cache_path_text(cache_dir, cache_id)
@@ -93,12 +101,14 @@ def _try_read_cache_text(cache_dir: str | Path, cache_id: Optional[str]) -> Opti
 
 
 def _write_cache_text(cache_dir: str | Path, cache_id: str, text: str) -> None:
+    """Write text cache deterministically (utf-8)."""
     p = _cache_path_text(cache_dir, cache_id)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(text, encoding="utf-8")
 
 
 def _sanitize_for_filename(s: str) -> str:
+    """Sanitize arbitrary text for safe filename tags (used in failure dumps)."""
     s = s.strip().replace("/", "_").replace("\\", "_")
     s = re.sub(r"\s+", "_", s)
     s = re.sub(r"[^A-Za-z0-9._-]", "_", s)
@@ -230,8 +240,14 @@ def run_prompt_yaml_json(
     dump_failures: bool = True, # write raw outputs to artifacts/cache/_failures
 ) -> BaseModel:
     """
-    Load prompt YAML from file, render with variables, call Gemini,
-    extract JSON, validate against schema_model, and optionally cache.
+    Run a YAML prompt and return validated JSON as a Pydantic model.
+
+    Steps:
+    1) Cache read (unless force=True)
+    2) Load + render prompt file
+    3) Call Gemini
+    4) Extract JSON (robust) + validate via Pydantic
+    5) Cache write (optional)
 
     Notes:
     - No hashing is used; cache_id must be deterministic and provided by caller.
@@ -295,7 +311,7 @@ def run_prompt_yaml_json(
                     attempt=attempt,
                     out_text=out_text if "out_text" in locals() else "",
                 )
-
+            # Retry by prefixing corrective instructions to the same prompt.
             prompt = _corrective_prefix(str(e)) + prompt
             continue
 

@@ -1,6 +1,6 @@
 # core/schema_postprocess.py
 """
-Schema Post-Processing — deterministic hardening for schema/llm_schema.py
+Schema post-processing — deterministic hardening for schema/llm_schema.py
 
 Intent
 - Take raw LLM output (may include markdown fences / extra text)
@@ -11,8 +11,8 @@ Intent
 - Ensure __all__ contains required exports
 
 Design notes
-- Conservative text surgery (line-based) for fence stripping / ConfigDict injection
-- AST-based static safety check (validate_schema_ast) runs before execution
+- Conservative, line-based text surgery for fence stripping / ConfigDict injection.
+- Static AST safety check (validate_schema_ast) runs BEFORE execution/import.
 """
 
 from __future__ import annotations
@@ -150,7 +150,9 @@ def _insert_model_config_into_class_block(code: str, class_name: str) -> str:
 def _ensure___all__(code: str, required: Sequence[str]) -> str:
     """
     Ensure __all__ exists and contains required names.
-    If missing, append at bottom.
+
+    If missing: append __all__ at the bottom.
+    If present: preserve existing order best-effort and append missing required names.
     """
     m = re.search(r"^__all__\s*=\s*\[(.*?)\]\s*$", code, flags=re.MULTILINE | re.DOTALL)
     if not m:

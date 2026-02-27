@@ -1,21 +1,25 @@
 # functions/online/pipeline_3b_bm25_search.py
-from __future__ import annotations
-
 """
-Pipeline 3b — Online BM25 Search (Lexical)
+Pipeline 3b — online BM25 search (lexical)
 
 Thin orchestration layer.
 
-Responsibilities:
-- Load config (parameters.yaml)
-- Resolve BM25 corpus path (bm25_corpus.jsonl)
-- Build and cache BM25Index in-process
+Responsibilities
+- Load parameters.yaml (typed config)
+- Resolve BM25 corpus path (bm25_corpus.jsonl) relative to repo root
+- Build and cache BM25Index in-process (process-local cache)
 - Run BM25 search for a query
 - Return API-friendly payload
 
 Core logic lives in:
-    functions/core/bm25.py
+- functions/core/bm25.py
+
+ONLINE safety notes
+- No LLM calls here.
+- Reads persisted corpus artifacts only; no writes.
 """
+
+from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence
@@ -52,7 +56,13 @@ def _bm25_cache_key(
     source_key: str,
     doc_key: str,
 ) -> str:
-    # Stringify config to avoid subtle cache mismatches across workers / reloads
+    """
+    Build a cache key for the in-process BM25 index.
+
+    Note:
+    - Includes resolved corpus path + BM25 params + tokenizer settings + field mapping.
+      This avoids subtle cache mismatches when configs change across deployments.
+    """
     tok = cfg.tokenizer
     return (
         f"{Path(corpus_path).resolve()}||"
@@ -72,11 +82,11 @@ def get_bm25_index_cached(
     doc_key: str,
 ) -> Any:
     """
-    Load corpus JSONL, build BM25Index, cache per (path + cfg + key mapping).
+    Load corpus JSONL, build BM25Index, and cache per (path + cfg + key mapping).
 
     Notes:
     - Cache is process-local. In multi-worker serving, each worker has its own cache.
-    - On Cloud Run cold start, first request builds the index.
+    - On Cloud Run cold start, the first request builds the index.
     """
     key = _bm25_cache_key(
         corpus_path=corpus_path,
@@ -102,7 +112,7 @@ def get_bm25_index_cached(
         doc_key=doc_key,
     )
 
-    # Evict oldest entries if cache is full
+    # Evict oldest entries if cache is full (deterministic FIFO eviction).
     while len(_BM25_CACHE) >= _BM25_CACHE_MAX_SIZE:
         oldest_key = next(iter(_BM25_CACHE))
         del _BM25_CACHE[oldest_key]

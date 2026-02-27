@@ -3,21 +3,24 @@
 Config Loader — Universal LLM Batch Generation Framework (Typed YAML Configs)
 
 Intent
-- Load + validate universal YAML configuration files:
+- Load and validate YAML configs:
   - configs/parameters.yaml
   - configs/credentials.yaml
-- Return typed configuration objects (Pydantic v2) aligned with the universal framework.
+- Return typed configuration objects (Pydantic v2), used as the single source of truth
+  across batch + online pipelines.
 
 What this module guarantees
 - Strict validation: invalid configs fail fast with actionable Pydantic errors.
 - Unicode whitespace hardening BEFORE YAML parse: NBSP/BOM/narrow NBSP normalized.
-- Minimal filesystem setup via ensure_dirs() for cache / outputs / reports / logs / schema archive.
+- Minimal filesystem setup via ensure_dirs() for cache / outputs / reports / logs /
+  schema archive / index_store (used by online serving).
 
-Forward compatibility
+Backward / forward compatibility
 - Accepts older configs that used:
-  - llm_schema.path (maps to py_path)
-  - cache.artifact_dir (maps to cache.dir)
-  - missing context/artifacts/run blocks
+  - llm_schema.path (mapped to llm_schema.py_path)
+  - cache.artifact_dir (mapped to cache.dir)
+  - report.sample_per_role (mapped to report.sample_per_group)
+- Missing blocks fall back to model defaults (run/context/artifacts/etc.).
 """
 
 from __future__ import annotations
@@ -45,6 +48,7 @@ OutputFormat = Literal["psv", "jsonl"]
 
 
 class RunConfig(BaseModel):
+    """Top-level runtime metadata (logging/timezone/run_id)."""
     name: str = "universal_llm_batch_gen_framework"
     timezone: str = "Asia/Tokyo"
     log_level: str = "INFO"
@@ -53,6 +57,7 @@ class RunConfig(BaseModel):
 
 
 class InputConfig(BaseModel):
+    """Input table settings for batch ingestion (pipeline 2)."""
     path: str = "raw_data/input.csv"
     format: InputFormat = "csv"
     encoding: str = "utf-8"
@@ -61,6 +66,7 @@ class InputConfig(BaseModel):
 
 
 class GroupingConfig(BaseModel):
+    """Optional grouping behavior for batch outputs (unrelated to Skills-RAG online flow)."""
     enabled: bool = False
     column: Optional[str] = None
     mode: GroupingMode = "group_output"
@@ -75,6 +81,7 @@ class GroupingConfig(BaseModel):
 
 
 class ContextColumnsConfig(BaseModel):
+    """Column-selection controls for context building."""
     mode: ContextColumnsMode = "all"
     include: list[str] = Field(default_factory=list)
     exclude: list[str] = Field(default_factory=list)
@@ -133,6 +140,8 @@ class PromptsConfig(BaseModel):
 
 class SchemaConfig(BaseModel):
     """
+    Schema paths and auto-generation behavior.
+
     Current (preferred):
       - py_path
       - txt_path
@@ -158,6 +167,7 @@ class SchemaConfig(BaseModel):
 
 
 class LLMConfig(BaseModel):
+    """LLM execution settings used by online pipelines (4b/4c) and schema auto-gen."""
     model_name: str = "gemini-3-flash-preview"
     temperature: float = 1.0
     max_retries: int = 3
@@ -190,6 +200,8 @@ class LLMConfig(BaseModel):
 
 class CacheConfig(BaseModel):
     """
+    Deterministic cache configuration (LLM calls + optional retrieval artifacts).
+
     Current (preferred):
       - dir
 
@@ -220,6 +232,7 @@ class CacheConfig(BaseModel):
 
 
 class ArtifactsConfig(BaseModel):
+    """Convenience paths for common artifact folders."""
     dir: str = "artifacts"
     outputs_dir: str = "artifacts/outputs"
     reports_dir: str = "artifacts/reports"
@@ -227,6 +240,7 @@ class ArtifactsConfig(BaseModel):
 
 
 class OutputsConfig(BaseModel):
+    """Batch output formats/paths (unrelated to API payload; used in batch jobs)."""
     formats: list[OutputFormat] = Field(default_factory=lambda: ["psv", "jsonl"])
     psv_path: str = "artifacts/outputs/output.psv"
     jsonl_path: str = "artifacts/outputs/output.jsonl"
@@ -240,6 +254,7 @@ class OutputsConfig(BaseModel):
 
 
 class ReportConfig(BaseModel):
+    """Report output configuration (md/html)."""
     enabled: bool = True
     md_path: str = "artifacts/reports/report.md"
     html_path: str = "artifacts/reports/report.html"
@@ -275,6 +290,7 @@ RagBm25Backend = Literal["local"]
 
 
 class EmbeddingsConfig(BaseModel):
+    """Embeddings settings for batch index build (pipeline 2) and online vector search (3a)."""
     model_name: str = "gemini-embedding-001"
     batch_size: int = 128
     dim: Optional[int] = None
@@ -309,6 +325,7 @@ class RagBackendConfig(BaseModel):
 
 
 class RagCorpusConfig(BaseModel):
+    """Column mapping for the skills corpus (must exist in input table)."""
     id_col: str = "skill_id"
     title_col: str = "skill_name"
     text_col: str = "skill_text"
@@ -374,12 +391,14 @@ class IndexStoreBm25Config(BaseModel):
 
 
 class IndexStoreConfig(BaseModel):
+    """Where pipeline 2 writes indexes and where online pipelines read them from."""
     dir: str = "artifacts/index_store"
     faiss: IndexStoreFaissConfig = Field(default_factory=IndexStoreFaissConfig)
     bm25: IndexStoreBm25Config = Field(default_factory=IndexStoreBm25Config)
 
 
 class ParametersConfig(BaseModel):
+    """Top-level typed view of parameters.yaml."""
     run: RunConfig = Field(default_factory=RunConfig)
 
     input: InputConfig = Field(default_factory=InputConfig)
@@ -395,7 +414,7 @@ class ParametersConfig(BaseModel):
     outputs: OutputsConfig = Field(default_factory=OutputsConfig)
     report: ReportConfig = Field(default_factory=ReportConfig)
 
-    # NEW blocks
+    # Skills-RAG blocks
     embeddings: EmbeddingsConfig = Field(default_factory=EmbeddingsConfig)
     rag: RagConfig = Field(default_factory=RagConfig)
     index_store: IndexStoreConfig = Field(default_factory=IndexStoreConfig)
@@ -464,6 +483,7 @@ def _load_yaml(path: str | Path) -> Dict[str, Any]:
 
 
 def load_parameters(path: str | Path = "configs/parameters.yaml") -> ParametersConfig:
+    """Load parameters.yaml and return a validated typed ParametersConfig."""
     logger = get_logger(__name__)
     raw = _load_yaml(path)
     try:
@@ -474,6 +494,7 @@ def load_parameters(path: str | Path = "configs/parameters.yaml") -> ParametersC
 
 
 def load_credentials(path: str | Path = "configs/credentials.yaml") -> CredentialsConfig:
+    """Load credentials.yaml and return a validated typed CredentialsConfig."""
     logger = get_logger(__name__)
     raw = _load_yaml(path)
     try:

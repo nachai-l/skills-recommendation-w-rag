@@ -1,14 +1,29 @@
-# ============================================================
+# =============================================================================
 # Skills Recommendation via Hybrid RAG (FAISS + BM25)
-# Built on Universal LLM Batch Generation & Validation Framework
-# ============================================================
+#
+# This file is the single source of truth for both:
+# - Batch pipelines (0–2): schema + index building
+# - Online pipelines (3a–5): retrieval + context + LLM generation + API payload
+#
+# High-level flow:
+# - Pipeline 2 (batch): ingest skill taxonomy -> build FAISS + BM25 index_store
+# - Pipeline 3a/3b (online): retrieve candidates via vector + BM25
+# - Pipeline 4a (online): render context using `context.row_template`
+# - Pipeline 4b/4c (online): LLM generate (and optional judge)
+# - Pipeline 5 (online): package final API payload (+ meta/debug)
+#
+# Notes / conventions:
+# - Paths are repo-relative (Cloud Run container must include required artifacts/paths)
+# - `index_store.dir` must exist and contain FAISS/BM25 artifacts for online serving
+# - `cache.enabled` controls deterministic caching of LLM calls (and optional retrieval)
+# =============================================================================
 
 run:
   name: skills_recommendation_via_rag
   timezone: Asia/Bangkok
   log_level: INFO
-  log_file: null
-  run_id: null
+  log_file: null      # null -> stdout only (recommended for Cloud Run)
+  run_id: null        # null -> auto-generated per run
 
 # ------------------------------------------------------------
 # Input table configuration (Pipeline 2 - Batch ingest/index)
@@ -18,7 +33,7 @@ input:
   path: raw_data/skill_taxonomy.csv
   format: csv                   # csv | psv | tsv | xlsx
   encoding: utf-8
-  sheet: null
+  sheet: null # only used for xlsx
 
   required_columns:
     - skill_id
@@ -66,8 +81,8 @@ context:
   auto_kv_block: false
   kv_order: input_order
 
-  max_context_chars: 30000
-  truncate_field_chars: 2000
+  max_context_chars: 30000        # hard cap to avoid overly large LLM inputs
+  truncate_field_chars: 2000      # per-field truncation before building context
 
   group_header_template: null
   group_footer_template: null
@@ -80,7 +95,7 @@ prompts:
     path: prompts/generation.yaml
 
   judge:
-    enabled: false
+    enabled: false     # turn on only when you want PASS/FAIL gating in online flow
     path: prompts/judge.yaml
 
   schema_auto_py_generation:
@@ -96,7 +111,7 @@ llm_schema:
   py_path: schema/llm_schema.py
   txt_path: schema/llm_schema.txt
   auto_generate: true
-  force_regenerate: true
+  force_regenerate: true  # true -> will overwrite schema each run (dev-mode)
   archive_dir: archived/
 
 # ------------------------------------------------------------
@@ -106,7 +121,7 @@ embeddings:
   model_name: gemini-embedding-001
   batch_size: 64
   dim: 3072
-  normalize: true
+  normalize: true        # ensures cosine similarity compatibility with FAISS usage
   task_type: SEMANTIC_SIMILARITY
   max_workers: 5
   cache_dir: artifacts/cache/embeddings
@@ -142,7 +157,7 @@ rag:
     top_k_default: 20
 
   hybrid:
-    alpha: 0.6
+    alpha: 0.6           # higher -> more weight on vector; lower -> more BM25 influence
     normalize_scores: true
     tie_break: [hybrid, vector, bm25, id]
 
@@ -150,7 +165,7 @@ rag:
 # Index store locations (Pipeline 2 outputs; used by online)
 # ------------------------------------------------------------
 index_store:
-  dir: artifacts/index_store
+  dir: artifacts/index_store # online serving loads artifacts from here
 
   faiss:
     index_path: artifacts/index_store/faiss.index

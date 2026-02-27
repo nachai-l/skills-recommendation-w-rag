@@ -1,4 +1,22 @@
 # functions/core/context_render.py
+"""
+Context renderer (Pipeline 4a) — deterministic row templating with size bounds.
+
+Intent
+- Render retrieval rows into a single `{context}` string for LLM prompts.
+- Apply:
+  - column selection over `meta` (all/include/exclude)
+  - per-field truncation (string fields only)
+  - overall context character budget (`max_context_chars`)
+- Keep rendering deterministic and tolerant to missing template keys.
+
+Key behaviors
+- Uses `format_map()` with a SafeFormatDict so missing placeholders render as "" (no KeyError).
+- Scores always come from the merged retrieval row (not from meta).
+- Enforces a hard cap so returned context never exceeds `max_context_chars`.
+- Adds a trailing newline when possible (helps prompt readability) without exceeding the cap.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -6,11 +24,13 @@ from typing import Any, Dict, List, Optional
 
 
 class _SafeFormatDict(dict):
+    """format_map helper: missing keys become empty strings instead of raising KeyError."""
     def __missing__(self, key: str) -> str:
         return ""
 
 
 def _truncate_str(s: Any, max_chars: int) -> str:
+    """Deterministically truncate a value (stringify; None -> '')."""
     if s is None:
         return ""
     text = str(s)
@@ -26,6 +46,14 @@ def select_meta_fields(
     include: List[str],
     exclude: List[str],
 ) -> Dict[str, Any]:
+    """
+    Select meta fields according to the configured columns mode.
+
+    mode:
+      - all: include all meta keys
+      - include: include only keys listed in `include` (missing -> "")
+      - exclude: include all except keys listed in `exclude`
+    """
     if not isinstance(meta, dict):
         return {}
 
@@ -40,7 +68,7 @@ def select_meta_fields(
         # fallback to all
         out = dict(meta)
 
-    # ensure deterministic key stability for missing items
+    # Deterministic key stability: ensure included keys exist even if missing in meta.
     if mode == "include":
         for k in include:
             out.setdefault(k, "")
@@ -49,6 +77,7 @@ def select_meta_fields(
 
 @dataclass
 class ContextRenderDebug:
+    """Debug counters for rendered context size and join coverage."""
     context_chars: int
     context_truncated: bool
     rows_rendered: int
@@ -96,26 +125,27 @@ def render_context_rows(
         row_data.setdefault("skill_name", r.get("skill_name", ""))
         row_data.setdefault("source", r.get("source", ""))
 
-        # Scores
+        # Scores (not taken from meta)
         row_data["score_vector"] = r.get("score_vector", 0.0)
         row_data["score_bm25"] = r.get("score_bm25", 0.0)
         row_data["score_hybrid"] = r.get("score_hybrid", 0.0)
 
-        # Truncate string fields deterministically
+        # Truncate string fields deterministically (do not touch numeric scores)
         for k, v in list(row_data.items()):
             if isinstance(v, str) or v is None:
                 row_data[k] = _truncate_str(v, truncate_field_chars)
 
-        # Format row
+        # Format row with missing-key tolerance.
         row_str = tmpl.format_map(_SafeFormatDict(row_data)).rstrip()
 
         if not row_str:
             continue
 
-        # Ensure newline separation
+        # Ensure newline separation between rows.
         block = row_str + "\n"
         block_len = len(block)
 
+        # Enforce overall context budget.
         if max_context_chars and max_context_chars > 0 and (total + block_len) > max_context_chars:
             if total == 0:
                 # First row already too large -> hard truncate the block
@@ -132,7 +162,7 @@ def render_context_rows(
         total += block_len
         count += 1
 
-    # Assemble final context
+    # Assemble final context (no extra whitespace).
     context = "".join(rendered_parts).rstrip()
 
     # Add trailing newline only if it won't violate max_context_chars

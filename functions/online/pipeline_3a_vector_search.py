@@ -1,21 +1,27 @@
 # functions/online/pipeline_3a_vector_search.py
-from __future__ import annotations
-
 """
-Pipeline 3a — Online Vector Search (FAISS)
+Pipeline 3a — online vector search (FAISS)
 
 Thin orchestration layer.
 
-Responsibilities:
-- Load config (parameters.yaml)
-- Load cached FAISS store (index + meta)
-- Embed query online (Gemini embeddings)
-- Call core vector search logic
+Responsibilities
+- Load parameters.yaml (typed config)
+- Resolve repo-root-relative artifact paths (index + meta)
+- Load cached FAISS store (process-local cache)
+- Build an online embed_fn adapter (Gemini embeddings) using repo embedding utilities
+- Call core vector search logic (ONLINE-safe)
 - Return API-friendly payload
 
 Core logic lives in:
-    functions/core/vector_search.py
+- functions/core/vector_search.py
+
+ONLINE safety notes
+- This module performs embeddings (online) but must NOT call LLM generation.
+- Retrieval artifacts are read-only; no writes occur here.
 """
+
+from __future__ import annotations
+
 
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Sequence

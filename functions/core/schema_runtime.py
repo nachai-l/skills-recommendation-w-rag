@@ -1,16 +1,23 @@
 # functions/core/schema_runtime.py
 """
-Schema Runtime Loader
+Schema runtime loader
 
 Intent
-- Load schema/llm_schema.py dynamically at runtime and resolve required Pydantic models.
-- Centralize the import/validation logic so Pipeline 4 (and later Pipeline 5/6) stay thin.
+- Dynamically load schema/llm_schema.py at runtime and resolve required Pydantic models.
+- Centralize import + model resolution so pipelines stay thin.
 
 Contract
 - Required model:
-    - LLMOutput (pydantic.BaseModel subclass)
+  - LLMOutput (pydantic.BaseModel subclass)
 - Optional model:
-    - JudgeResult (pydantic.BaseModel subclass)
+  - JudgeResult (pydantic.BaseModel subclass)
+
+Notes
+- This module only loads and resolves models. It does NOT:
+  - generate schema files
+  - postprocess schema text
+  - perform AST safety validation
+Those responsibilities live in schema generation/postprocess modules.
 """
 
 from __future__ import annotations
@@ -23,6 +30,13 @@ from pydantic import BaseModel
 
 
 def load_schema_module(schema_py_path: str | Path):
+    """
+    Dynamically import a schema module from a .py path and return the loaded module.
+
+    Raises:
+      FileNotFoundError: if schema_py_path does not exist
+      RuntimeError: if import spec cannot be created
+    """
     p = Path(schema_py_path)
     if not p.exists():
         raise FileNotFoundError(f"Schema py not found: {p}")
@@ -42,6 +56,11 @@ def resolve_schema_models(schema_py_path: str | Path) -> Tuple[Type[BaseModel], 
 
     Returns:
       (LLMOutput_model, JudgeResult_model_or_None)
+
+    Notes:
+    - Calls model_rebuild() to resolve deferred annotations (Literal/ForwardRef/etc).
+    - Passes the module namespace so Pydantic can resolve typing symbols imported
+      inside the dynamically-loaded module.
     """
     mod = load_schema_module(schema_py_path)
 

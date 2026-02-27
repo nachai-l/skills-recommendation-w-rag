@@ -1,4 +1,28 @@
 # functions/core/vector_search.py
+"""
+Vector search (FAISS) — online-safe core retrieval logic.
+
+Intent
+- Perform vector (semantic) retrieval against a persisted FAISS index.
+- Keep the core search path ONLINE-safe:
+  - No LLM calls here
+  - Embedding is dependency-injected via `embed_fn`
+  - Retrieval is performed via a provided FAISS store interface
+
+Design goals
+- Deterministic results:
+  - stable tie-break sorting for reproducibility
+- Strict shape/type checks:
+  - enforce (1, dim) query embedding
+  - ensure float32 contiguous arrays for FAISS
+- Clear failure modes:
+  - hard-fail if FAISS->meta alignment is broken (missing meta for an internal_idx)
+
+Primary APIs
+- vector_search_faiss(...): returns VectorSearchResult (typed)
+- to_api_payload(...): JSON-serializable dict for pipeline orchestration / API output
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -15,6 +39,7 @@ EmbedFn = Callable[[str], np.ndarray]  # should return shape (dim,) or (1, dim)
 
 @dataclass(frozen=True)
 class VectorHit:
+    """A single vector retrieval hit."""
     skill_id: str
     skill_name: str
     score_vector: float
@@ -24,6 +49,7 @@ class VectorHit:
 
 @dataclass(frozen=True)
 class VectorSearchResult:
+    """Typed search result container."""
     query: str
     top_k: int
     results: List[VectorHit]
@@ -46,6 +72,7 @@ def _l2_normalize(vecs: np.ndarray, eps: float = 1e-12) -> np.ndarray:
 
 
 def _ensure_2d_float32_contiguous(x: np.ndarray) -> np.ndarray:
+    """Ensure x is 2D, float32, contiguous (FAISS-friendly)."""
     if not isinstance(x, np.ndarray):
         x = np.asarray(x)
     if x.ndim == 1:
@@ -120,13 +147,13 @@ def vector_search_faiss(
     if k <= 0:
         raise ValueError("top_k must be > 0")
 
-    # Determine expected dim
+    # Determine expected dim (caller can override; otherwise infer from store.dim).
     store_dim = int(getattr(store, "dim", 0) or 0)
     expected_dim = int(dim) if dim is not None else store_dim
     if expected_dim <= 0:
         raise ValueError("Unable to determine embedding dimension (dim). Provide dim or ensure store.dim is set.")
 
-    # Embed query
+    # Embed query (dependency-injected; keeps this module ONLINE-safe).
     emb = embed_fn(q)
     emb2d = _ensure_2d_float32_contiguous(emb)
 
@@ -136,6 +163,7 @@ def vector_search_faiss(
     if emb2d.shape[1] != expected_dim:
         raise ValueError(f"Embedding dim mismatch: got {emb2d.shape[1]}, expected {expected_dim}")
 
+    # Normalize query embedding if index expects cosine similarity with IP.
     if normalize:
         emb2d = _l2_normalize(emb2d)
 
@@ -145,7 +173,7 @@ def vector_search_faiss(
     scores = _ensure_2d_float32_contiguous(scores)
     indices = _ensure_2d_float32_contiguous(indices).astype(np.int64)
 
-    # Build hits
+    # Build hits (hard-fail if meta alignment invariant is broken).
     hits: List[VectorHit] = []
     for score, idx in zip(scores[0].tolist(), indices[0].tolist()):
         internal_idx = int(idx)

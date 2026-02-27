@@ -1,14 +1,24 @@
 # functions/online/pipeline_4b_generate.py
+"""
+Pipeline 4b — online generation wrapper (thin)
+
+Intent
+- Provide a minimal ONLINE entrypoint for LLM generation (recommendation output).
+- Keep orchestration responsibilities small and delegate all real work to:
+    functions/core/llm_generate.py
+
+Responsibilities
+- Load parameters.yaml (typed config)
+- Resolve repo_root (CWD-independent path handling)
+- Call core runner `run_pipeline_4b_generate_core(...)`
+- Optionally log lightweight debug metadata
+
+Notes
+- This wrapper should remain thin so core logic stays testable and reusable
+  (e.g., for API, batch, or future orchestration layers).
+"""
+
 from __future__ import annotations
-
-"""
-Pipeline 4b — Online (Thin) Wrapper
-
-Responsibilities:
-- Load parameters.yaml
-- Resolve repo_root (CWD-independent)
-- Delegate all real work to core: functions/core/llm_generate.py
-"""
 
 from typing import Any, Dict, Optional
 

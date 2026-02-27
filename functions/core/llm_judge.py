@@ -1,3 +1,25 @@
+# functions/core/llm_judge.py
+"""
+LLM judge core (Online Pipeline 4c) — validate generation output with a judge prompt.
+
+Intent
+- Run a judge prompt (YAML) against the LLM-generated recommendation JSON (pipeline 4b),
+  optionally using retrieval context and schema text, and return a schema-validated judge result.
+
+Key behaviors
+- Schema safety: validates schema code via AST checks before importing/executing it.
+- Stable prompt injection:
+  - Injects `output_json` as deterministic JSON (sorted keys, UTF-8) via json_dumps_stable()
+  - Uses brace-safe rendering implemented in functions.llm.prompts/runner
+- Deterministic caching:
+  - cache_id derived from query + prompt + model + temperature + output_json + context
+- Returns JSON-serializable payload (API-friendly).
+
+Notes
+- Currently reuses params.llm.* settings for the judge model.
+  If needed later, introduce a dedicated llm_judge config block.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -15,12 +37,16 @@ from functions.llm.runner import run_prompt_yaml_json
 from functions.utils.config_access import cfg_get as _get, cfg_get_path as _get_path
 from functions.utils.paths import resolve_path
 
-
+# -----------------------------
+# File helpers
+# -----------------------------
 def _read_text(path: str | Path) -> str:
+    """Read UTF-8 text from disk."""
     return Path(path).read_text(encoding="utf-8")
 
 
 def _load_yaml(path: str | Path) -> Dict[str, Any]:
+    """Load YAML and enforce a mapping/dict root (used for credentials.yaml here)."""
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"YAML file not found: {p}")
@@ -29,13 +55,16 @@ def _load_yaml(path: str | Path) -> Dict[str, Any]:
         raise ValueError(f"YAML must be mapping/dict: {p}")
     return obj
 
-
+# -----------------------------
+# Schema loader (Pydantic model)
+# -----------------------------
 def load_schema_model(schema_py_path: str | Path, *, model_name: str) -> Type[BaseModel]:
     """
     Load schema/llm_schema.py and return the requested Pydantic model.
 
-    IMPORTANT: call model_rebuild() with module namespace to avoid
-    'not fully defined' errors in Pydantic v2.
+    Safety:
+    - Validates schema code via AST allowlist before execution.
+    - Calls model_rebuild() with module namespace to avoid "not fully defined" errors (Pydantic v2).
     """
     schema_py_path = Path(schema_py_path)
     if not schema_py_path.exists():
@@ -68,7 +97,9 @@ def load_schema_model(schema_py_path: str | Path, *, model_name: str) -> Type[Ba
 
     return Model
 
-
+# -----------------------------
+# Cache id (deterministic)
+# -----------------------------
 def build_cache_id_p4c(
     *,
     query: str,
@@ -78,6 +109,7 @@ def build_cache_id_p4c(
     model_name: str,
     temperature: float,
 ) -> str:
+    """Deterministic cache_id for judge runner (filename-safe, SHA256-based)."""
     h = hashlib.sha256()
     h.update(query.encode("utf-8"))
     h.update(b"\n--prompt--\n")
@@ -92,7 +124,9 @@ def build_cache_id_p4c(
     h.update(context.encode("utf-8"))
     return f"p4c__{h.hexdigest()}"
 
-
+# -----------------------------
+# Core runner
+# -----------------------------
 def run_pipeline_4c_judge_core(
     *,
     params: Any,
@@ -106,8 +140,11 @@ def run_pipeline_4c_judge_core(
     debug: bool,
 ) -> Dict[str, Any]:
     repo_root = Path(repo_root)
+    # -----------------------------
+    # Core runner
+    # -----------------------------
 
-    # Paths
+    # Paths (repo-root anchored)
     judge_prompt_path_raw = str(_get_path(params, ["prompts", "judge", "path"]))
     schema_py_raw = str(_get_path(params, ["llm_schema", "py_path"]))
     schema_txt_raw = str(_get_path(params, ["llm_schema", "txt_path"]))
@@ -122,7 +159,7 @@ def run_pipeline_4c_judge_core(
     temperature = float(_get(llm_cfg, "temperature"))
     max_retries = int(_get(llm_cfg, "max_retries"))
 
-    # Cache
+    # Cache config
     cache_cfg = _get(params, "cache")
     cache_dir_raw = str(_get(cache_cfg, "dir"))
     cache_enabled = bool(_get(cache_cfg, "enabled"))
@@ -130,10 +167,10 @@ def run_pipeline_4c_judge_core(
     dump_failures = bool(_get(cache_cfg, "dump_failures"))
     cache_dir = resolve_path(cache_dir_raw, base_dir=repo_root)
 
-    # Stable JSON for injection
+    # Stable JSON for injection (prevents non-deterministic key ordering)
     output_json = json_dumps_stable(llm_validated)
 
-    # Optional: schema txt for judge prompt injection (depends on judge.yaml)
+    # Optional: schema txt for judge prompt injection (depends on judge.yaml template)
     llm_schema_txt = _read_text(schema_txt_path)
 
     # Variables (MOST COMMON placeholders used by judge prompts)
@@ -155,7 +192,7 @@ def run_pipeline_4c_judge_core(
     credentials = _load_yaml(resolve_path(credentials_path, base_dir=repo_root))
     client_ctx = build_gemini_client(credentials, model_name_override=model_name_override)
 
-    # cache_id
+    # Deterministic cache_id
     cache_id = build_cache_id_p4c(
         query=(query or "").strip(),
         context=str(context or ""),

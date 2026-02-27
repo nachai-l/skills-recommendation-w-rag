@@ -1,4 +1,26 @@
 # functions/core/hybrid_merge.py
+"""
+Hybrid merge (Pipeline 4a) — deterministic union of vector + BM25 results.
+
+Intent
+- Merge FAISS (vector) and BM25 (lexical) retrieval outputs into a single ranked list.
+- Produce a stable merged row shape used downstream for:
+  - context rendering (4a)
+  - LLM generation (4b)
+  - API payload joins (5)
+
+Core behaviors
+- Union merge by `skill_id` (preferred key).
+- Optional min-max normalization per modality (vector and BM25) to make scores comparable.
+- Hybrid score: alpha * vector_norm + (1 - alpha) * bm25_norm
+- Deterministic sorting / tie-break:
+  score_hybrid desc -> score_vector desc -> score_bm25 desc -> skill_id asc
+
+Meta policy
+- Prefer FAISS meta when both exist (usually richer / canonical for full text fields).
+- If FAISS meta is empty, allow BM25 meta to backfill.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -24,6 +46,7 @@ def normalize_minmax(scores: List[float]) -> List[float]:
 
 
 def _safe_float(x: Any, default: float = 0.0) -> float:
+    """Best-effort float conversion (None/invalid -> default)."""
     try:
         if x is None:
             return default
@@ -47,6 +70,7 @@ def _get_meta(result_row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _get_skill_id(result_row: Dict[str, Any]) -> str:
+    """Extract canonical skill_id (fallback to meta.skill_id)."""
     sid = result_row.get("skill_id")
     if sid:
         return str(sid)
@@ -58,6 +82,7 @@ def _get_skill_id(result_row: Dict[str, Any]) -> str:
 
 
 def _get_skill_name(result_row: Dict[str, Any]) -> str:
+    """Extract skill_name (fallback to meta.skill_name and legacy BM25 'title')."""
     name = result_row.get("skill_name")
     if name:
         return str(name)
@@ -71,6 +96,7 @@ def _get_skill_name(result_row: Dict[str, Any]) -> str:
 
 
 def _get_source(result_row: Dict[str, Any]) -> str:
+    """Extract source (fallback to meta.source)."""
     src = result_row.get("source")
     if src:
         return str(src)
@@ -81,6 +107,7 @@ def _get_source(result_row: Dict[str, Any]) -> str:
 
 
 def _get_internal_idx(result_row: Dict[str, Any]) -> Optional[int]:
+    """Extract internal_idx if present and int-castable; else None."""
     v = result_row.get("internal_idx")
     if v is None:
         return None
@@ -92,6 +119,7 @@ def _get_internal_idx(result_row: Dict[str, Any]) -> Optional[int]:
 
 @dataclass
 class HybridMergeDebug:
+    """Debug counters for merge coverage and raw score ranges."""
     num_vector_hits: int
     num_bm25_hits: int
     num_merged: int
@@ -115,7 +143,7 @@ def merge_hybrid_results(
       score_hybrid desc -> score_vector desc -> score_bm25 desc -> skill_id asc
     """
     # -------------
-    # Collect raw scores
+    # Collect raw scores (for optional normalization and debug ranges)
     # -------------
     vec_scores_raw: List[float] = []
     bm_scores_raw: List[float] = []

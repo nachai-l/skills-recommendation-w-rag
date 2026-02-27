@@ -1,18 +1,16 @@
-from __future__ import annotations
-
+# functions/utils/text_embeddings.py
 """
 functions.utils.text_embeddings
 
 Embedding utilities for Skills Recommendation (Hybrid RAG: FAISS + BM25).
-(Updated: batching + bounded parallelism + disk cache + progress logging + test mode)
 
 Key features
 ------------
-- Batch embedding using the Gemini embeddings API via `embed_content(contents=[...])`
+- Batch embedding via Gemini embeddings API (`embed_content(contents=[...])`)
 - Optional on-disk cache per batch to resume/re-run cheaply
 - Optional bounded parallelism across batches (ThreadPoolExecutor)
 - Progress logging every N batches (configurable)
-- Optional test_mode to truncate workload deterministically for fast dry runs
+- Optional test_mode for deterministic workload truncation (fast dry runs)
 - Deterministic numeric post-processing:
   - float32
   - optional dimension truncation
@@ -25,6 +23,8 @@ Design constraints
   Import inside methods that actually call the SDK.
 - Stable factory `build_embedding_model()` so tests can monkeypatch one symbol.
 """
+
+from __future__ import annotations
 
 import hashlib
 import os
@@ -71,6 +71,7 @@ def _load_gemini_api_key(credentials_path: str = "configs/credentials.yaml") -> 
 # Small helpers
 # -----------------------------------------------------------------------------
 def _sha256_str(s: str) -> str:
+    """Stable SHA256 hex digest for cache key material."""
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
 
@@ -95,6 +96,7 @@ def _atomic_write_npy(path: Path, arr: np.ndarray) -> None:
     os.replace(str(tmp), str(path))
 
 def _try_load_npy(path: Path) -> Optional[np.ndarray]:
+    """Best-effort load for cached .npy arrays; returns None on failure."""
     if not path.exists():
         return None
     try:

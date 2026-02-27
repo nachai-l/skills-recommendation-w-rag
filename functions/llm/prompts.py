@@ -4,17 +4,17 @@ Prompt Templates (YAML) — File-based Loading + Deterministic Rendering
 
 Intent
 - Load prompt templates from YAML files under /prompts (file-based, no registry keys).
-- Render prompts deterministically with runtime variables.
+- Render prompts deterministically using runtime variables.
 - Sanitize problematic Unicode whitespace that can silently break YAML block scalars.
 
 IMPORTANT (2026-02)
-- We safely support injecting JSON/text blobs (e.g., {llm_schema}, {context}) that may contain
-  literal "{" and "}" characters.
+- Supports injecting JSON/text blobs (e.g., {llm_schema}, {context}) that may contain
+  literal "{" / "}" characters.
 - Default rendering uses a SAFE placeholder replacer (not str.format) to avoid brace issues.
 
 Supported placeholders
 - Templates use tokens like: {context}, {llm_schema}, {output_json}, etc.
-- Literal braces in templates can be written as {{ and }} (same as format convention),
+- Literal braces in templates can be written as {{ and }} (format-style escape),
   and will render as single { and }.
 
 Primary APIs
@@ -65,7 +65,7 @@ def _sanitize_prompt_text(text: str) -> str:
 
 def _sanitize_prompt_dict(d: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Sanitize all string fields in a prompt dict.
+    Sanitize all string fields in a prompt dict (leave non-strings unchanged).
     """
     clean: Dict[str, Any] = {}
     for k, v in d.items():
@@ -95,6 +95,7 @@ def load_prompt_file(path: str | Path) -> Dict[str, Any]:
     if not isinstance(obj, dict):
         raise ValueError(f"Prompt YAML must be a mapping/dict: {p}")
 
+    # Sanitize raw YAML text before parsing (prevents invisible whitespace issues).
     obj = _sanitize_prompt_dict(obj)
 
     # Require at least user block (system is optional)
@@ -129,7 +130,7 @@ def _safe_render_with_brace_literals(template: str, variables: Dict[str, Any]) -
     R_SENT = "\uE001"
     tmp = template.replace("{{", L_SENT).replace("}}", R_SENT)
 
-    # Find placeholders and validate presence
+    # Validate placeholders exist before rendering (deterministic missing-key error).
     missing: set[str] = set()
     for name in _PLACEHOLDER_RE.findall(tmp):
         if name not in variables:
@@ -174,7 +175,7 @@ def render_prompt_text(text: str, variables: Dict[str, Any], *, escape_braces: b
     if escape_braces:
         return _safe_render_with_brace_literals(text, variables)
 
-    # Legacy behavior
+    # Legacy behavior (may break when injected values include braces).
     try:
         return text.format(**variables)
     except KeyError as e:
