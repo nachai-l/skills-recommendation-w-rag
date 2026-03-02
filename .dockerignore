@@ -1,0 +1,56 @@
+# ---------------------------------------------------------------
+# .dockerignore — keeps the Cloud Build upload small and fast.
+#
+# Rule: only ship what the API process needs at runtime:
+#   app/, functions/, configs/, prompts/, schema/,
+#   requirements.txt, artifacts/index_store/
+# Everything else is build/dev artefact.
+# ---------------------------------------------------------------
+
+# Git internals
+.git/
+.gitignore
+.gitattributes
+
+# Python runtime noise
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Local virtual environments
+.venv/
+venv/
+env/
+
+# Environment / secrets (never bake into image)
+.env
+.env.*
+
+# Artifacts — keep index_store, exclude everything else
+artifacts/cache/
+artifacts/outputs/
+artifacts/logs/
+artifacts/reports/
+
+# Batch-only / dev-only directories
+archived/
+raw_data/
+scripts/
+tests/
+docs/
+dev_progress_log/
+
+# Editor / OS noise
+.DS_Store
+*.swp
+*.swo
+Thumbs.db
+
+# Markdown docs (not needed at runtime)
+*.md
