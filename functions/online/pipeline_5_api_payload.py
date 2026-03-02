@@ -17,9 +17,12 @@ Responsibilities
 Core join logic lives in:
 - functions/core/api_payload.py (build_api_payload_from_4b)
 
-Notes
-- When judge is enabled, we pass `p4b_payload` into 4c to avoid re-running generation.
-- `require_all_meta=True` makes the join strict (fail if any recommendation cannot be joined).
+Responsibilities:
+- Call 4b (must include retrieval_results)
+- Optionally call 4c and require PASS, retrying up to llm.max_retries times on FAIL
+  (each retry forces fresh P4b generation to avoid returning the same bad output)
+- Build final API response payload:
+  each recommended skill includes retrieval meta (skill_text + criteria) + LLM reasoning.
 """
 
 from __future__ import annotations
@@ -29,6 +32,8 @@ from typing import Any, Dict, Optional
 from functions.core.api_payload import build_api_payload_from_4b
 from functions.online.pipeline_4b_generate import run_pipeline_4b_generate
 from functions.online.pipeline_4c_judge import run_pipeline_4c_judge
+from functions.utils.config import load_parameters
+from functions.utils.config_access import cfg_get_path as _get_path
 from functions.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -68,7 +73,10 @@ def run_pipeline_5_api_payload(
         - meta: generation_cache_id (+ future metadata)
         - debug: optional debug info (join stats, retrieval counts)
     """
-    # 1) Run generation (must include retrieval context)
+    params = load_parameters(parameters_path)
+    max_retries = int(_get_path(params, ["llm", "max_retries"]))
+
+    # 1) Initial generation (must include retrieval context for payload join)
     p4b = run_pipeline_4b_generate(
         query=query,
         top_k=top_k,
@@ -76,29 +84,65 @@ def run_pipeline_5_api_payload(
         parameters_path=parameters_path,
         credentials_path=credentials_path,
         schema_model_name=schema_model_name_generation,
-        include_retrieval_results=True,   # required for joining meta
+        include_retrieval_results=True,
         top_k_vector=top_k_vector,
         top_k_bm25=top_k_bm25,
     )
 
-    # 2) Optional judge gating (reuse p4b to avoid re-running 4b)
+    # 2) Optional judge gating with retries
+    judge_attempts = 0
     if require_judge_pass:
-        p4c = run_pipeline_4c_judge(
-            query=query,
-            top_k=top_k,
-            debug=debug,
-            parameters_path=parameters_path,
-            credentials_path=credentials_path,
-            schema_model_name_generation=schema_model_name_generation,
-            judge_model_name=judge_model_name,
-            include_retrieval_results=True,
-            top_k_vector=top_k_vector,
-            top_k_bm25=top_k_bm25,
-            p4b_payload=p4b,
-        )
-        verdict = (p4c.get("judge_validated") or {}).get("verdict")
-        if verdict != "PASS":
-            raise RuntimeError(f"Judge did not PASS (verdict={verdict!r}); refusing to build API payload.")
+        last_verdict = None
+        for attempt in range(1, max_retries + 1):
+            if attempt > 1:
+                logger.warning(
+                    "Judge FAIL (attempt %d/%d) — regenerating P4b with fresh LLM call",
+                    attempt - 1,
+                    max_retries,
+                )
+                p4b = run_pipeline_4b_generate(
+                    query=query,
+                    top_k=top_k,
+                    debug=debug,
+                    parameters_path=parameters_path,
+                    credentials_path=credentials_path,
+                    schema_model_name=schema_model_name_generation,
+                    include_retrieval_results=True,
+                    top_k_vector=top_k_vector,
+                    top_k_bm25=top_k_bm25,
+                    force_regenerate=True,
+                )
+
+            p4c = run_pipeline_4c_judge(
+                query=query,
+                top_k=top_k,
+                debug=debug,
+                parameters_path=parameters_path,
+                credentials_path=credentials_path,
+                schema_model_name_generation=schema_model_name_generation,
+                judge_model_name=judge_model_name,
+                include_retrieval_results=True,
+                top_k_vector=top_k_vector,
+                top_k_bm25=top_k_bm25,
+                p4b_payload=p4b,
+            )
+            judge_attempts = attempt
+            last_verdict = (p4c.get("judge_validated") or {}).get("verdict")
+
+            if last_verdict == "PASS":
+                break
+
+            logger.warning(
+                "Judge FAIL (attempt %d/%d): verdict=%r",
+                attempt,
+                max_retries,
+                last_verdict,
+            )
+
+        if last_verdict != "PASS":
+            raise RuntimeError(
+                f"Judge did not PASS after {max_retries} attempt(s): verdict={last_verdict!r}"
+            )
 
     llm_validated = p4b["llm_validated"]
     retrieval_results = p4b.get("retrieval_results") or []
@@ -123,6 +167,7 @@ def run_pipeline_5_api_payload(
         out["debug"] = {
             "join": dbg.__dict__,
             "num_retrieval_results": len(retrieval_results),
+            "judge_attempts": judge_attempts,
         }
 
     return out

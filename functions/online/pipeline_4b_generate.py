@@ -41,6 +41,7 @@ def run_pipeline_4b_generate(
     include_retrieval_results: bool = False,
     top_k_vector: Optional[int] = None,
     top_k_bm25: Optional[int] = None,
+    force_regenerate: bool = False,
 ) -> Dict[str, Any]:
     """
     Thin wrapper around core 4b generation.
@@ -54,6 +55,7 @@ def run_pipeline_4b_generate(
       schema_model_name: exported Pydantic model name in schema/llm_schema.py (default: LLMOutput)
       include_retrieval_results: include retrieval_results + context in output payload
       top_k_vector/top_k_bm25: retrieval depths for 4a (optional)
+      force_regenerate: bypass LLM cache and force a fresh generation (used by judge retry)
 
     Returns:
       JSON-serializable dict payload.
@@ -85,6 +87,7 @@ def run_pipeline_4b_generate(
         include_retrieval_results=include_retrieval_results,
         top_k_vector=top_k_vector,
         top_k_bm25=top_k_bm25,
+        force_regenerate=force_regenerate,
     )
 
     if debug:

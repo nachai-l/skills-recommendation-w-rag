@@ -169,6 +169,7 @@ def run_pipeline_4b_generate_core(
     include_retrieval_results: bool,
     top_k_vector: Optional[int],
     top_k_bm25: Optional[int],
+    force_regenerate: bool = False,
 ) -> Dict[str, Any]:
     """
     Core implementation for Pipeline 4b.
@@ -205,7 +206,7 @@ def run_pipeline_4b_generate_core(
     cache_cfg = _get(params, "cache")
     cache_dir_raw = str(_get(cache_cfg, "dir"))
     cache_enabled = bool(_get(cache_cfg, "enabled"))
-    cache_force = bool(_get(cache_cfg, "force"))
+    cache_force = bool(_get(cache_cfg, "force")) or force_regenerate
     dump_failures = bool(_get(cache_cfg, "dump_failures"))
     cache_dir = resolve_path(cache_dir_raw, base_dir=repo_root)
 

@@ -37,12 +37,20 @@ _BASEMODEL_CLASS_RE = re.compile(
 
 def extract_python_code(text: str) -> str:
     """
-    Extract python code from an LLM response.
-    Accepts:
-    - raw python
-    - ```python fenced blocks
-    - ``` fenced blocks (assumed python)
-    If multiple blocks exist, uses the first python-ish block.
+    Extract Python source code from a raw LLM response string.
+
+    Tries extraction in priority order:
+    1. Content inside a ```python ... ``` fenced block (case-insensitive).
+    2. Content inside any ``` ... ``` fenced block (assumed Python).
+    3. The raw text itself, stripped (fallback — assumes no prose wrapper).
+
+    When multiple fenced blocks are present, the first matching block is used.
+
+    Args:
+        text: Raw LLM response that may contain prose, markdown fences, or bare code.
+
+    Returns:
+        Extracted and stripped Python source string, or ``""`` if ``text`` is empty.
     """
     if not text:
         return ""
@@ -60,8 +68,19 @@ def extract_python_code(text: str) -> str:
 
 def _ensure_import(code: str, line: str) -> str:
     """
-    Ensure an import line exists. If missing, insert after the last import statement.
-    Conservative: does not reorder existing imports.
+    Ensure a specific import line is present in the source code.
+
+    If ``line`` already appears anywhere in ``code`` (substring match), the
+    code is returned unchanged. Otherwise, ``line`` is inserted immediately
+    after the last existing import statement. If no import statements exist,
+    it is inserted at line 0. Existing imports are never reordered.
+
+    Args:
+        code: Python source code as a string.
+        line: The exact import line to insert, e.g. ``"from pydantic import ConfigDict"``.
+
+    Returns:
+        Source code guaranteed to contain ``line``, with a trailing newline.
     """
     if line in code:
         return code
@@ -82,15 +101,30 @@ def _ensure_import(code: str, line: str) -> str:
 
 def _insert_model_config_into_class_block(code: str, class_name: str) -> str:
     """
-    Insert `model_config = ConfigDict(extra="forbid")` as the first statement
-    inside `class <name>(BaseModel):` block, if not already present.
+    Insert ``model_config = ConfigDict(extra="forbid")`` into a BaseModel subclass body.
 
-    Heuristic:
-    - Find class header
-    - Skip blank lines
-    - If first non-blank is a docstring, skip the docstring block
-    - If next non-blank is model_config, do nothing
-    - Else insert model_config line
+    Targets the class named ``class_name`` with the signature
+    ``class <name>(BaseModel):``. The line is inserted as the first body statement
+    after any leading docstring. If ``model_config`` already appears as the first
+    non-blank body statement (before or after a docstring), the code is returned
+    unchanged.
+
+    Heuristic (line-based, no AST):
+    1. Locate the class header line by name.
+    2. Skip leading blank lines in the body.
+    3. If the first non-blank line is a triple-quoted docstring, skip past it.
+    4. Skip any further blank lines.
+    5. If ``model_config`` is already present at the insertion point, return unchanged.
+    6. Otherwise insert the ``model_config`` line at the correct indentation.
+
+    Args:
+        code: Python source code as a string.
+        class_name: Name of the ``BaseModel`` subclass to target.
+
+    Returns:
+        Source code with ``model_config = ConfigDict(extra="forbid")`` injected,
+        or the original code unchanged if the class was not found or the config
+        was already present.
     """
     lines = code.splitlines()
 
@@ -149,10 +183,20 @@ def _insert_model_config_into_class_block(code: str, class_name: str) -> str:
 
 def _ensure___all__(code: str, required: Sequence[str]) -> str:
     """
-    Ensure __all__ exists and contains required names.
+    Ensure ``__all__`` exists in the source and contains every name in ``required``.
 
-    If missing: append __all__ at the bottom.
-    If present: preserve existing order best-effort and append missing required names.
+    - If ``__all__`` is absent: appends ``__all__ = [<required names>]`` at the
+      bottom of the file.
+    - If ``__all__`` is present: preserves the existing order of names (scanning
+      for both single- and double-quoted entries) and appends any ``required``
+      names not already listed.
+
+    Args:
+        code: Python source code as a string.
+        required: Sequence of names that must appear in ``__all__``.
+
+    Returns:
+        Source code with a ``__all__`` list that includes all ``required`` names.
     """
     m = re.search(r"^__all__\s*=\s*\[(.*?)\]\s*$", code, flags=re.MULTILINE | re.DOTALL)
     if not m:
@@ -208,7 +252,20 @@ _ALLOWED_TOP_LEVEL_NODE_TYPES = (
 
 
 def _is_docstring_expr(node: ast.AST) -> bool:
-    """Return True iff node is an ast.Expr whose value is a string constant."""
+    """
+    Return True if ``node`` is an ``ast.Expr`` wrapping a string constant.
+
+    Used to distinguish module-level docstrings (permitted at the top level of
+    schema files) from other bare expression statements such as ``print()`` or
+    ``eval()`` (which are forbidden).
+
+    Args:
+        node: Any AST node from a parsed module.
+
+    Returns:
+        True if the node is an ``ast.Expr`` whose ``value`` is an
+        ``ast.Constant`` holding a ``str``; False otherwise.
+    """
     return isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
 
 
@@ -300,13 +357,32 @@ def postprocess_schema_py(
     enforce_forbid_extra: bool = True,
 ) -> str:
     """
-    Deterministic post-LLM cleanup + hardening for schema/llm_schema.py.
+    Deterministic post-processing and hardening pipeline for LLM-generated schema code.
 
-    Guarantees (best-effort):
-    - fences stripped
-    - ConfigDict import present if we inject model_config
-    - model_config inserted into BaseModel subclasses (if enforce_forbid_extra)
-    - __all__ includes required exports
+    Applies the following transformations in order:
+
+    1. **Fence stripping** — extracts Python source from markdown code blocks
+       via :func:`extract_python_code`.
+    2. **ConfigDict injection** (when ``enforce_forbid_extra=True``) — ensures
+       ``from pydantic import ConfigDict`` is imported and inserts
+       ``model_config = ConfigDict(extra="forbid")`` into every ``BaseModel``
+       subclass body that does not already have it.
+    3. **Literal import** — if the code references ``Literal[...]`` without an
+       existing ``import Literal``, injects ``from typing import Literal``.
+    4. **``__all__`` enforcement** — ensures ``__all__`` exists and contains
+       every name in ``required_exports``.
+
+    Args:
+        raw_text: Raw LLM response, which may contain prose, markdown fences,
+            or bare Python source.
+        required_exports: Names that must appear in ``__all__``.
+            Defaults to ``("LLMOutput", "JudgeResult")``.
+        enforce_forbid_extra: When True, injects ``model_config`` into all
+            ``BaseModel`` subclasses found in the code. Defaults to True.
+
+    Returns:
+        Hardened Python source code as a string, or ``""`` if no Python code
+        could be extracted from ``raw_text``.
     """
     code = extract_python_code(raw_text).strip()
     if not code:
