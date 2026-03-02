@@ -1,23 +1,31 @@
-from __future__ import annotations
-
+# functions/online/pipeline_4a_hybrid_context.py
 """
-Pipeline 4a — Hybrid Merge + Context Construction
+Pipeline 4a — hybrid merge + context construction
 
 Thin orchestration layer.
 
-Responsibilities:
+Responsibilities
 - Load parameters.yaml
-- Call P3a (FAISS) and P3b (BM25)
+- Call Pipeline 3a (FAISS vector search) and Pipeline 3b (BM25 lexical search)
 - Union merge by skill_id
-- Normalize scores (optional) + compute hybrid score
-- Stable tie-break
-- Render {context} via context.row_template with truncation caps
-- Return API-friendly payload
+- Optional score normalization + hybrid score computation
+- Deterministic tie-break ordering
+- Render `{context}` using context.row_template with:
+  - column selection over meta
+  - per-field truncation
+  - overall max_context_chars cap
+- Return an API-friendly payload for downstream 4b/5
 
 Core logic lives in:
 - functions/core/hybrid_merge.py
 - functions/core/context_render.py
+
+ONLINE safety notes
+- No LLM generation here.
+- Retrieval + merge + context rendering only.
 """
+
+from __future__ import annotations
 
 from typing import Any, Dict, Optional, Sequence
 
@@ -45,16 +53,29 @@ def run_pipeline_4a_hybrid_context(
     top_k_bm25: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
-    Run Hybrid (3a + 3b) and build context.
+    Pipeline 4a — hybrid merge + context construction
 
-    Args:
-      query: user query string
-      top_k: output top_k; if None uses rag.vector_search.top_k_default
-      debug: include debug fields
-      parameters_path: path to parameters.yaml
-      include_meta: include meta in merged results payload
-      include_internal_idx: include internal idx fields (vector + bm25)
-      top_k_vector/top_k_bm25: retrieval depths (defaults to top_k)
+    Thin orchestration layer.
+
+    Responsibilities
+    - Load parameters.yaml
+    - Call Pipeline 3a (FAISS vector search) and Pipeline 3b (BM25 lexical search)
+    - Union merge by skill_id
+    - Optional score normalization + hybrid score computation
+    - Deterministic tie-break ordering
+    - Render `{context}` using context.row_template with:
+      - column selection over meta
+      - per-field truncation
+      - overall max_context_chars cap
+    - Return an API-friendly payload for downstream 4b/5
+
+    Core logic lives in:
+    - functions/core/hybrid_merge.py
+    - functions/core/context_render.py
+
+    ONLINE safety notes
+    - No LLM generation here.
+    - Retrieval + merge + context rendering only.
     """
     params = load_parameters(parameters_path)
 
@@ -73,6 +94,7 @@ def run_pipeline_4a_hybrid_context(
     max_context_chars = int(_get_path(params, ["context", "max_context_chars"]) or 30000)
     truncate_field_chars = int(_get_path(params, ["context", "truncate_field_chars"]) or 2000)
 
+    # Retrieval depth can differ from output depth (e.g., retrieve deeper, then cut to k_out).
     k_vec = int(top_k_vector) if top_k_vector is not None else k_out
     k_bm = int(top_k_bm25) if top_k_bm25 is not None else k_out
 
@@ -118,10 +140,10 @@ def run_pipeline_4a_hybrid_context(
         normalize_scores=normalize_scores,
     )
 
-    # Cut to output k
+    # Cut to output k (context and output results are aligned to this truncated list).
     merged_rows = merged_rows[:k_out]
 
-    # Render context
+    # Render {context} for 4b prompt injection.
     context_text, dbg_ctx = render_context_rows(
         rows=merged_rows,
         row_template=row_template,

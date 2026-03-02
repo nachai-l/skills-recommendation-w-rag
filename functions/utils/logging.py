@@ -1,25 +1,28 @@
 # functions/utils/logging.py
 """
-Logging Utilities — Consistent, Structured Logs + Optional Client Silencing
+Logging utilities — consistent structured logs + optional client silencing
 
 Intent
 - Provide consistent logging across all pipelines/modules with a single configuration entrypoint.
 - Support correlation via `run_id` (injected into LogRecord).
-- Optionally reduce noise from verbose third-party client libraries (e.g., HTTP stacks, google genai SDK)
-  using a *belt-and-suspenders* strategy: logger disabling + handler filters + root filter.
+- Optionally reduce noise from verbose third-party client libraries (HTTP stacks, genai SDK)
+  using a belt-and-suspenders strategy:
+  - logger disabling (primary)
+  - handler filters (backstop)
+  - root logger filter (extra safety)
 
 What this module guarantees
-- **Idempotent root configuration:** `configure_logging()` avoids duplicating handlers across repeated calls.
-- **Stable log format:** timestamps + level + logger name + message (and optional run_id in record).
-- **Optional log-to-file:** add a FileHandler without breaking stream logging.
-- **Robust client log silencing (when enabled):**
-  - Disables noisy logger namespaces (prevents emission even if libraries attach handlers/reset levels),
-  - Installs handler-level filters on root handlers (backstop),
-  - Installs a root-logger filter (extra safety when propagation behaves unexpectedly).
+- Idempotent root configuration: configure_logging() avoids duplicating handlers across calls.
+- Stable log format: timestamp | level | logger name | message (and optional run_id on record).
+- Optional log-to-file: adds a FileHandler without breaking stream logging.
+- Robust client log silencing (when enabled):
+  - Disables noisy logger namespaces (prevents emission even if libs attach handlers/reset levels)
+  - Installs handler-level filters (backstop)
+  - Installs a root-logger filter (extra safety when propagation behaves unexpectedly)
 
 Integration with parameters.yaml
 - This module does NOT read YAML directly (kept reusable & testable).
-- Pipelines should load `configs/parameters.yaml` and call:
+- Pipelines should load configs/parameters.yaml and call:
     configure_logging_from_params(params, level="INFO", log_file=None)
   which applies:
     params.llm.silence_client_lv_logs

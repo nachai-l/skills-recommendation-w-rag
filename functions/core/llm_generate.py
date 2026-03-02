@@ -1,4 +1,25 @@
 # functions/core/llm_generate.py
+"""
+LLM generation core (Online Pipeline 4b) — prompt → Gemini → JSON-only → schema-validated output.
+
+Intent
+- Produce the LLM recommendation output for a query by:
+  1) Building retrieval context via pipeline 4a (hybrid FAISS + BM25)
+  2) Injecting `{context}` + `{llm_schema}` into a YAML prompt template
+  3) Calling Gemini and extracting JSON-only output
+  4) Validating output against the generated Pydantic schema (schema/llm_schema.py)
+  5) Caching deterministically via a caller-stable cache_id
+
+Key behaviors
+- Schema safety: validates schema code via AST checks before importing/executing it.
+- Deterministic caching: cache_id is derived from query + prompt + model + temperature + top_k + schema + context.
+- Online-friendly: returns JSON-serializable payloads (optionally includes retrieval results/context when requested).
+
+Notes
+- Prompt rendering uses the SAFE brace-aware renderer in functions.llm.prompts/runner
+  (not plain str.format), so injected blobs containing braces are supported.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -23,10 +44,12 @@ from functions.utils.paths import resolve_path
 # File helpers
 # -----------------------------
 def _read_text(path: str | Path) -> str:
+    """Read UTF-8 text from disk."""
     return Path(path).read_text(encoding="utf-8")
 
 
 def _load_yaml(path: str | Path) -> Dict[str, Any]:
+    """Load YAML and enforce a mapping/dict root (used for credentials.yaml here)."""
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"YAML file not found: {p}")
@@ -39,17 +62,20 @@ def _load_yaml(path: str | Path) -> Dict[str, Any]:
 # -----------------------------
 # Schema loader (Pydantic model)
 # -----------------------------
-def load_schema_model(schema_py_path: str | Path, *, model_name: str = "Output") -> Type[BaseModel]:
+def load_schema_model(schema_py_path: str | Path, *, model_name: str = "LLMOutput") -> Type[BaseModel]:
     """
     Load schema/llm_schema.py and return the Pydantic model class.
 
-    Default export expected: Output
+    Default export expected: `LLMOutput`.
+
+    Safety:
+    - Performs an AST allowlist validation before executing schema code.
     """
     schema_py_path = Path(schema_py_path)
     if not schema_py_path.exists():
         raise FileNotFoundError(f"Missing schema py: {schema_py_path}")
 
-    # Validate schema code with AST safety check before execution
+    # Validate schema code with AST safety check before execution.
     code = schema_py_path.read_text(encoding="utf-8")
     validate_schema_ast(code)
 
@@ -93,9 +119,7 @@ def build_cache_id_p4b(
     temperature: float,
     top_k: int,
 ) -> str:
-    """
-    Deterministic cache_id for runner (filename-safe).
-    """
+    """Deterministic cache_id for runner (filename-safe, SHA256-based)."""
     h = hashlib.sha256()
     h.update(query.encode("utf-8"))
     h.update(b"\n--prompt--\n")
@@ -118,6 +142,7 @@ def build_cache_id_p4b(
 # -----------------------------
 @dataclass
 class Pipeline4BResult:
+    """Optional structured container (currently not used by the API wrapper)."""
     query: str
     top_k: int
     alpha: float
@@ -148,9 +173,13 @@ def run_pipeline_4b_generate_core(
 ) -> Dict[str, Any]:
     """
     Core implementation for Pipeline 4b.
-    Online wrapper should pass already-loaded params + repo_root.
 
-    Returns: JSON-serializable dict payload (API-friendly).
+    Online wrapper should pass already-loaded `params` + `repo_root`.
+
+    Returns:
+      JSON-serializable dict payload (API-friendly), including:
+      - query, top_k, alpha, cache_id, llm_validated
+      - optional retrieval_results/context and debug block
     """
     repo_root = Path(repo_root)
 

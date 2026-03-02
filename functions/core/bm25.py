@@ -1,20 +1,23 @@
 # functions/core/bm25.py
-from __future__ import annotations
-
 """
 BM25 (in-process) — minimal deterministic implementation
 
 Intent
 - Provide a small, dependency-free BM25 scorer for online lexical retrieval.
-- Load bm25_corpus.jsonl (skill_id + doc + optional metadata)
-- Tokenize, compute document frequencies and IDF
-- Score queries using Okapi BM25
+- Load a JSONL BM25 corpus (skill_id + doc + optional metadata).
+- Tokenize, compute DF/IDF, and score queries using Okapi BM25.
 
 Design goals
-- Deterministic ranking with stable tie-breaks
-- Fast enough for ~38k docs in-memory
-- No external dependencies
+- Deterministic ranking with stable tie-breaks.
+- Fast enough for ~O(10^4–10^5) docs in-memory (e.g., ~38k skills).
+- No external dependencies (pure Python + stdlib).
+
+Notes
+- Tokenization is intentionally simple and deterministic.
+  Language-specific tokenizers (Thai/Japanese) should be implemented separately.
 """
+
+from __future__ import annotations
 
 import json
 import math
@@ -32,6 +35,7 @@ _PUNCT_RE = re.compile(r"[^\w\s]+", flags=re.UNICODE)
 
 @dataclass(frozen=True)
 class TokenizerConfig:
+    """Tokenizer controls for BM25 (kept simple for determinism)."""
     tokenizer: str = "simple"  # simple | whitespace
     lower: bool = True
     remove_punct: bool = True
@@ -39,12 +43,14 @@ class TokenizerConfig:
 
 
 def tokenize(text: str, cfg: TokenizerConfig) -> List[str]:
+    """Tokenize text deterministically using the configured options."""
     s = text or ""
     if cfg.lower:
         s = s.lower()
     if cfg.remove_punct:
         s = _PUNCT_RE.sub(" ", s)
 
+    # NOTE: cfg.tokenizer is currently informational (split() is whitespace-based).
     toks = s.split()
 
     if cfg.min_token_len and cfg.min_token_len > 1:
@@ -58,6 +64,7 @@ def tokenize(text: str, cfg: TokenizerConfig) -> List[str]:
 # -----------------------------
 @dataclass(frozen=True)
 class BM25Config:
+    """Okapi BM25 parameters and tokenization config."""
     k1: float = 1.5
     b: float = 0.75
     tokenizer: TokenizerConfig = TokenizerConfig()
@@ -65,6 +72,7 @@ class BM25Config:
 
 @dataclass(frozen=True)
 class BM25Doc:
+    """A single BM25 document row aligned to corpus order."""
     doc_id: int  # internal index aligned to corpus row order
     skill_id: str
     skill_name: Optional[str]
@@ -75,6 +83,7 @@ class BM25Doc:
 
 @dataclass(frozen=True)
 class BM25Hit:
+    """A scored BM25 search hit."""
     skill_id: str
     skill_name: str
     score_bm25: float
@@ -84,6 +93,7 @@ class BM25Hit:
 
 @dataclass
 class BM25Index:
+    """In-memory BM25 index (DF/IDF + per-doc TF maps)."""
     docs: List[BM25Doc]
     doc_len: List[int]
     avgdl: float
@@ -98,6 +108,7 @@ class BM25Index:
 
 
 def _compute_idf(n_docs: int, df: int) -> float:
+    """Compute Okapi BM25 IDF with a stable smoothing term."""
     return math.log(1.0 + (n_docs - df + 0.5) / (df + 0.5))
 
 
@@ -114,6 +125,13 @@ def build_bm25_index_from_rows(
     name_fallback_keys: Sequence[str] = ("skill_name", "name", "title", "label", "skill"),
     doc_fallback_keys: Sequence[str] = ("doc", "skill_text", "text", "content"),
 ) -> BM25Index:
+    """
+    Build a BM25Index from corpus rows.
+
+    Notes:
+    - Keeps a full `meta` dict per doc for downstream enrichment / API payload joins.
+    - Applies best-effort key fallback for robustness across corpus schema variants.
+    """
     docs: List[BM25Doc] = []
     tf: List[Dict[str, int]] = []
     df: Dict[str, int] = {}
@@ -194,6 +212,7 @@ def build_bm25_index_from_rows(
             counts[t] = counts.get(t, 0) + 1
         tf.append(counts)
 
+        # DF counts unique terms per doc (use counts keys, not raw tokens list).
         for t in counts.keys():
             df[t] = df.get(t, 0) + 1
 
@@ -224,6 +243,7 @@ def build_bm25_index_from_rows(
 
 
 def load_bm25_corpus_jsonl(path: str | Path) -> List[Dict[str, Any]]:
+    """Load BM25 corpus rows from JSONL (one dict/object per line)."""
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"BM25 corpus not found: {p}")
@@ -245,6 +265,7 @@ def load_bm25_corpus_jsonl(path: str | Path) -> List[Dict[str, Any]]:
 
 
 def bm25_score_query(index: BM25Index, query: str) -> List[float]:
+    """Compute BM25 scores for all docs (aligned to index.docs order)."""
     q = (query or "").strip()
     if not q:
         return [0.0] * index.n_docs
@@ -293,6 +314,14 @@ def bm25_search(
     meta_skill_id_key: str = "skill_id",
     meta_skill_name_key: str = "skill_name",
 ) -> Tuple[List[BM25Hit], Optional[Dict[str, Any]]]:
+    """
+    Search BM25 index and return top-k hits (deterministic order).
+
+    Tie-break:
+    - score_bm25 desc
+    - skill_id asc
+    - internal_idx asc
+    """
     q = (query or "").strip()
     if not q:
         raise ValueError("query must be non-empty")
@@ -327,6 +356,7 @@ def bm25_search(
             )
         )
 
+    # Deterministic ranking for stable results across runs.
     hits.sort(key=lambda h: (-h.score_bm25, str(h.skill_id), int(h.internal_idx)))
     hits = hits[:k]
 
@@ -354,6 +384,7 @@ def to_api_payload(
     include_meta: bool = True,
     include_internal_idx: bool = True,
 ) -> Dict[str, Any]:
+    """Convert BM25 hits into a JSON-serializable payload (for debugging/inspection)."""
     out_hits: List[Dict[str, Any]] = []
     for h in hits:
         row: Dict[str, Any] = {

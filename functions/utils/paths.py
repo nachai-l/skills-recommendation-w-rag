@@ -1,13 +1,16 @@
 # functions/utils/paths.py
 """
-Path helpers
+Path helpers (repo-root aware)
 
 Intent
-- Make pipeline behavior independent of CWD.
-- Standardize: configs/parameters.yaml => repo root.
+- Make pipeline behavior independent of the current working directory (CWD).
+- Provide a consistent way to resolve repo-relative paths starting from
+  `configs/parameters.yaml` (treated as an anchor to infer repo root).
 
-This is used heavily in pipelines to resolve relative prompt/schema paths.
+Used by:
+- Pipelines that need to resolve prompt/schema/artifact paths deterministically.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -15,8 +18,11 @@ from pathlib import Path
 
 def repo_root_from_parameters_path(parameters_path: str | Path) -> Path:
     """
-    Given configs/parameters.yaml, return repo root.
-    Works for absolute or relative paths.
+    Given a path to `configs/parameters.yaml`, return the repo root.
+
+    Works for absolute or relative paths by resolving first.
+    Example:
+      .../repo/configs/parameters.yaml -> .../repo
     """
     p = Path(parameters_path).resolve()
     # .../repo/configs/parameters.yaml -> .../repo
@@ -25,7 +31,9 @@ def repo_root_from_parameters_path(parameters_path: str | Path) -> Path:
 
 def resolve_path(path_like: str | Path, *, base_dir: str | Path) -> Path:
     """
-    Resolve a path relative to base_dir unless already absolute.
+    Resolve a path relative to base_dir unless it is already absolute.
+
+    Returns a resolved Path (absolute).
     """
     p = Path(path_like)
     if p.is_absolute():

@@ -1,22 +1,20 @@
 # functions/core/index_store.py
-from __future__ import annotations
-
 """
 functions.core.index_store
 
 Purpose
 -------
-Provide a minimal ONLINE-safe access layer for persisted retrieval artifacts.
+Provide a minimal ONLINE-safe access layer for persisted vector retrieval artifacts.
 
 In this Skills Recommendation repo, we use:
 - FAISS for vector search (Pipeline 3a)
-- BM25 for lexical search (Pipeline 3b) - stored separately (not in this module)
+- BM25 for lexical search (Pipeline 3b) — stored separately (not in this module)
 
 ONLINE safety contract
 ----------------------
-- This module MUST NOT call LLMs.
-- This module MUST NOT embed text.
-- This module must only load persisted artifacts and perform retrieval.
+- MUST NOT call LLMs.
+- MUST NOT embed text.
+- MUST only load persisted artifacts and perform retrieval.
 
 FAISS backend (MVP)
 -------------------
@@ -26,13 +24,15 @@ FAISS backend (MVP)
 Artifact alignment invariant
 ----------------------------
 - faiss_meta.jsonl row order MUST align with FAISS internal ids:
-    internal_idx i  <->  meta[i]
+    internal_idx i <-> meta[i]
 
 Planned production backend
 --------------------------
 - Vertex AI Vector Search (managed ANN)
-- We keep the `search()` contract small so online pipeline logic can remain stable.
+- We keep the `search()` contract small so online pipeline logic stays stable.
 """
+
+from __future__ import annotations
 
 import json
 from dataclasses import dataclass

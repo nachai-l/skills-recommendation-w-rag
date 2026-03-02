@@ -5,10 +5,10 @@ Writers (Deterministic Artifacts I/O)
 Intent
 - Provide a single, deterministic way to write pipeline outputs to disk.
 - Standardize how artifacts are persisted across pipelines:
-  - JSON (readable, deterministic)
+  - JSON (human-readable, deterministic)
   - JSONL for record-level outputs (LLM results, bundles, traceability)
   - CSV for tabular metrics and reports
-  - DELIMITED for PSV/TSV exports (Pipeline 5)
+  - DELIMITED for PSV/TSV exports (e.g., Pipeline 5 exports)
 
 External calls
 - json.dumps
@@ -25,28 +25,28 @@ Primary functions
 - write_psv(path, df) -> None
 
 Key behaviors / guarantees
-- **Deterministic output**
+- Deterministic output
   - JSON:
     - UTF-8 encoding
-    - sort_keys=True to ensure stable key ordering
+    - sort_keys=True for stable key ordering
     - ensure_ascii=False to preserve Unicode text
-    - pretty indent (readability)
+    - pretty indent for readability
   - JSONL:
     - One JSON object per line
     - UTF-8 encoding
-    - sort_keys=True to ensure stable key ordering
+    - sort_keys=True for stable key ordering
     - ensure_ascii=False to preserve Unicode text
   - CSV/DELIMITED:
     - UTF-8 encoding
     - index=False
     - Column order is exactly df.columns (caller-controlled)
 
-- **Filesystem safety**
+- Filesystem safety
   - ensure_parent_dir() is called automatically before writing.
   - Parent directories are created recursively and idempotently.
   - Safe to call repeatedly across pipeline stages.
 
-- **Observability**
+- Observability
   - All write operations emit INFO-level logs with:
     - file path
     - bytes written (JSON)
@@ -54,7 +54,7 @@ Key behaviors / guarantees
     - number of rows/columns (CSV/DELIMITED)
 
 Design notes
-- Writers are intentionally *thin*:
+- Writers are intentionally thin:
   - No schema enforcement
   - No column mutation
   - No validation logic

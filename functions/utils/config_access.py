@@ -1,10 +1,22 @@
 # functions/utils/config_access.py
 """
-Shared config access helpers.
+Config access helpers (dict-or-attribute traversal).
 
-Provides dict-or-attribute traversal for config objects (supports both
-raw dicts from YAML and Pydantic config models).
+Intent
+- Provide a tiny compatibility layer so callers can read config values from either:
+  - raw dicts (e.g., yaml.safe_load output), or
+  - typed config models (e.g., Pydantic BaseModel / dataclasses)
+
+Primary APIs
+- cfg_get(cfg, key) -> Any
+- cfg_get_path(cfg, path) -> Any
+
+Notes
+- This module is intentionally strict:
+  - dict access uses `cfg[key]` (raises KeyError if missing)
+  - attribute access uses `getattr(cfg, key)` (raises AttributeError if missing)
 """
+
 from __future__ import annotations
 
 from typing import Any, Sequence

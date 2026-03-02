@@ -2,10 +2,17 @@
 Text utilities (small, dependency-free)
 
 Intent
-- Keep tiny helpers that are shared across IO / processing modules.
-- Avoid trimming cell values (traceability); only use for column headers unless explicitly needed.
-- Deterministic behavior only (no randomness, no environment-dependent logic).
+- Keep tiny helpers shared across IO / core processing modules.
+- Preserve traceability: do not trim/mutate source cell values unless explicitly intended.
+- Deterministic only: no randomness, no environment-dependent behavior.
+
+Common usage
+- Column header trimming: `trim_lr()`
+- Context-safe stringification: `to_context_str()`
+- BM25 tokenization: `simple_tokenize()`
+- PSV-safe single-line output: `sanitize_psv_value()`
 """
+
 
 from __future__ import annotations
 

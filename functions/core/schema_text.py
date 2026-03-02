@@ -1,19 +1,20 @@
 # functions/core/schema_text.py
 """
-Schema Text Helpers (Pipeline 1)
+Schema text helpers (Pipeline 1)
 
-Goal
+Intent
 - Produce prompt-ready schema text for `{llm_schema}`.
 - Deterministic output (no LLM), JSON-only (preferred).
 
-Approach (preferred)
-- Import schema/llm_schema.py as a module
-- Extract required exports: LLMOutput, JudgeResult
-- Convert to JSON Schema using Pydantic v2 `model_json_schema()`
+Preferred approach
+- Import schema/llm_schema.py as a uniquely-named module
+- Extract required exports (LLMOutput, JudgeResult)
+- Convert to JSON Schema via Pydantic v2 `model_json_schema()`
 - Dump as stable JSON (sorted keys, fixed indent)
 
 Important
 - Avoid sys.modules collisions by using a unique module name per import.
+- Validate schema code with AST safety check before execution.
 """
 
 from __future__ import annotations
@@ -32,11 +33,18 @@ DEFAULT_EXPORTS = ("LLMOutput", "JudgeResult")
 
 
 def _stable_json_dumps(obj: Any) -> str:
+    """Stable JSON serializer for prompt injection (UTF-8, sort_keys, fixed indent)."""
     return json.dumps(obj, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
 
 
 def _unique_module_name(py_path: Path) -> str:
-    # unique per file path + content hash (stable-ish, avoids collisions)
+    """
+    Create a unique module name for dynamic import.
+
+    Note:
+    - Uses file path + mtime_ns to avoid sys.modules collisions across regenerations.
+    - Stable-ish within a single filesystem state; changes when file changes.
+    """
     blob = (str(py_path.resolve()) + "|" + str(py_path.stat().st_mtime_ns)).encode("utf-8", errors="replace")
     h = sha1(blob).hexdigest()[:12]
     return f"llm_schema_runtime_{h}"
@@ -44,7 +52,11 @@ def _unique_module_name(py_path: Path) -> str:
 
 def _load_module_from_path(py_path: Path) -> Any:
     """
-    Import a module from a file path safely, avoiding module-name collisions.
+    Create a unique module name for dynamic import.
+
+    Note:
+    - Uses file path + mtime_ns to avoid sys.modules collisions across regenerations.
+    - Stable-ish within a single filesystem state; changes when file changes.
     """
     if not py_path.exists():
         raise FileNotFoundError(f"Schema .py not found: {py_path}")
@@ -120,6 +132,9 @@ def build_prompt_schema_json_from_module(
 def extract_python_code_from_text(text: str) -> str:
     """
     Fallback utility: extract python code if the input is fenced.
+
+    Note:
+    - Used only by the optional fallback path (when allow_fallback=True).
     """
     if not text:
         return ""
@@ -138,6 +153,8 @@ def extract_python_code_from_text(text: str) -> str:
 def extract_public_schema_text_from_py(py_code: str) -> str:
     """
     Conservative fallback: return cleaned python text (NOT prompt-ideal).
+
+    Intended only for debugging and emergency operation when JSON schema extraction fails.
     """
     if not py_code:
         return ""

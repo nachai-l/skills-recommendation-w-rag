@@ -1,14 +1,14 @@
 # functions/utils/hashing.py
 """
-Hashing utilities (deterministic)
+Hashing utilities (deterministic fingerprints)
 
 Intent
 - Provide small, reusable hashing helpers for stable cache keys / fingerprints across pipelines.
-- Keep all hashing logic in one place to avoid drift.
+- Keep hashing logic centralized to avoid drift and inconsistent encodings.
 
 Notes
-- Uses SHA1 for stable, short-ish digests (40 hex chars).
-- Intended for *fingerprinting*, not security.
+- Uses SHA1 for short, stable digests (40 hex chars).
+- Intended for fingerprinting and cache keys, not cryptographic security.
 """
 
 from __future__ import annotations
