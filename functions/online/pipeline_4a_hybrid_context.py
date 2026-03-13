@@ -98,6 +98,9 @@ def run_pipeline_4a_hybrid_context(
     k_vec = int(top_k_vector) if top_k_vector is not None else k_out
     k_bm = int(top_k_bm25) if top_k_bm25 is not None else k_out
 
+    if k_vec == 0 and k_bm == 0:
+        raise ValueError("top_k_vector and top_k_bm25 cannot both be 0; at least one retrieval engine must be enabled")
+
     if debug:
         logger.info(
             "P4a hybrid start",
@@ -113,25 +116,32 @@ def run_pipeline_4a_hybrid_context(
         )
 
     # Retrieve (always include_meta=True internally for context robustness)
-    p3a = run_pipeline_3a_vector_search(
-        query=query,
-        top_k=k_vec,
-        debug=debug,
-        parameters_path=parameters_path,
-        include_meta=True,
-        include_internal_idx=True,
-    )
-    p3b = run_pipeline_3b_bm25_search(
-        query=query,
-        top_k=k_bm,
-        debug=debug,
-        parameters_path=parameters_path,
-        include_meta=True,
-        include_internal_idx=True,
-    )
+    # Either engine can be disabled by setting its top_k to 0
+    if k_vec > 0:
+        p3a = run_pipeline_3a_vector_search(
+            query=query,
+            top_k=k_vec,
+            debug=debug,
+            parameters_path=parameters_path,
+            include_meta=True,
+            include_internal_idx=True,
+        )
+        vec_results = list(p3a.get("results") or [])
+    else:
+        vec_results = []
 
-    vec_results = list(p3a.get("results") or [])
-    bm_results = list(p3b.get("results") or [])
+    if k_bm > 0:
+        p3b = run_pipeline_3b_bm25_search(
+            query=query,
+            top_k=k_bm,
+            debug=debug,
+            parameters_path=parameters_path,
+            include_meta=True,
+            include_internal_idx=True,
+        )
+        bm_results = list(p3b.get("results") or [])
+    else:
+        bm_results = []
 
     merged_rows, dbg_merge = merge_hybrid_results(
         vector_results=vec_results,
