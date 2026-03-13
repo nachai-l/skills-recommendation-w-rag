@@ -40,12 +40,11 @@ context:
       - skill_name
       - skill_text
       - source
-      - Foundational_Criteria
-      - Intermediate_Criteria
-      - Advanced_Criteria
     exclude: []
 
   # Pipeline 4a will inject {context} built from pipeline3a + pipeline3b results.
+  # Criteria fields are excluded from the LLM input context — they are joined from
+  # retrieval meta in api_payload.py (post-generation), so the LLM does not need them.
   row_template: |
     - skill_id: {skill_id}
       skill_name: {skill_name}
@@ -55,13 +54,6 @@ context:
       score_hybrid: {score_hybrid}
       skill_text: |
         {skill_text}
-      criteria:
-        foundational: |
-          {Foundational_Criteria}
-        intermediate: |
-          {Intermediate_Criteria}
-        advanced: |
-          {Advanced_Criteria}
 
   auto_kv_block: false
   kv_order: input_order
