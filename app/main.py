@@ -25,8 +25,8 @@ class RecommendSkillsRequest(BaseModel):
     top_k: Optional[int] = Field(20, ge=1, le=100, description="Number of merged/context rows for LLM + max output join")
     debug: bool = Field(False, description="Include debug fields in response")
     require_judge_pass: bool = Field(True, description="If true, run judge and require PASS")
-    top_k_vector: Optional[int] = Field(20, ge=1, le=200, description="Vector retrieval depth (3a) for 4a/4b/5")
-    top_k_bm25: Optional[int] = Field(20, ge=1, le=200, description="BM25 retrieval depth (3b) for 4a/4b/5")
+    top_k_vector: Optional[int] = Field(20, ge=0, le=200, description="Vector retrieval depth (3a) for 4a/4b/5; set to 0 to disable vector search")
+    top_k_bm25: Optional[int] = Field(20, ge=0, le=200, description="BM25 retrieval depth (3b) for 4a/4b/5; set to 0 to disable BM25 search")
     require_all_meta: bool = Field(
         False,
         description="If true, fail when any recommended skill cannot be joined to retrieval meta.",
@@ -39,6 +39,10 @@ class RecommendSkillsRequest(BaseModel):
         if not stripped:
             raise ValueError("Query cannot be empty or whitespace-only")
         return stripped
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.top_k_vector == 0 and self.top_k_bm25 == 0:
+            raise ValueError("top_k_vector and top_k_bm25 cannot both be 0; at least one retrieval engine must be enabled")
 
 
 class RecommendSkillsResponse(BaseModel):
