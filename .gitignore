@@ -11,8 +11,6 @@ __pycache__/
 .vscode/
 .idea/
 
-# Keep large/private data out of public repo
-raw_data/skill_taxonomy.csv
 
 # Generated artifacts (ignore contents)
 artifacts/**
